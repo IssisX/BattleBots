@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project: Chimera - 3D Battle Bots</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;700&display=swap" rel="stylesheet">
+    <!-- Load Cannon.js library globally -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <style>
+        body {
+            font-family: 'Exo 2', sans-serif;
+            background-color: #111827;
+            color: #E5E7EB;
+            overflow: hidden;
+        }
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        canvas {
+            display: block;
+        }
+        .ui-panel {
+            position: absolute;
+            z-index: 10;
+            background-color: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(55, 65, 81, 0.5);
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transition: all 0.3s ease-in-out;
+        }
+        .control-button {
+            transition: all 0.2s ease-in-out;
+            border: 1px solid transparent;
+        }
+        .control-button:hover {
+            transform: translateY(-2px);
+            background-color: #374151;
+            border-color: #4f5b70;
+        }
+        .control-button.active {
+            background-color: #3B82F6;
+            color: white;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+        /* Custom scrollbar for UI panels */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(55, 65, 81, 0.5);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #6B7280;
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #9CA3AF;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="canvas-container"></div>
+
+    <!-- Left Side Panel: Inventory & Tools -->
+    <div id="left-panel" class="ui-panel top-4 left-4 w-72 flex flex-col h-[calc(100vh-2rem)]">
+        <div class="p-4 border-b border-gray-700">
+            <h1 class="text-2xl font-bold text-white tracking-wider">Project: Chimera</h1>
+            <p class="text-xs text-gray-400">Advanced Robotics Workshop</p>
+        </div>
+        
+        <!-- Tools -->
+        <div class="p-4 border-b border-gray-700">
+            <h2 class="text-lg font-semibold mb-3">Build Tools</h2>
+            <div class="grid grid-cols-3 gap-2">
+                <button id="tool-select" title="Select & Move (Q)" class="control-button active p-2 bg-gray-700 rounded-md flex justify-center items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7 19 2-7 7-2z"/></svg>
+                </button>
+                 <button id="tool-rotate" title="Rotate (E)" class="control-button p-2 bg-gray-700 rounded-md flex justify-center items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2v6h6M21.5 22v-6h-6"/><path d="M22 11.5A10 10 0 0 0 3.5 12.5"/><path d="M2 12.5a10 10 0 0 0 18.5-1"/></svg>
+                </button>
+                <button id="tool-delete" title="Delete (Del)" class="control-button p-2 bg-gray-700 rounded-md flex justify-center items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Inventory -->
+        <div class="p-4 flex-grow overflow-y-auto custom-scrollbar">
+            <h2 class="text-lg font-semibold mb-3">Inventory</h2>
+            <div id="inventory-parts" class="space-y-2">
+                <!-- Parts will be dynamically injected here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Right Side Panel: Inspector -->
+    <div id="inspector-panel" class="ui-panel top-4 right-4 w-80 h-[calc(100vh-2rem)] flex flex-col">
+        <div class="p-4 border-b border-gray-700">
+            <h2 class="text-lg font-semibold">Inspector</h2>
+        </div>
+        <div id="inspector-content" class="p-4 flex-grow overflow-y-auto custom-scrollbar">
+            <p class="text-gray-400 text-center italic mt-4">Select a part to inspect its properties.</p>
+        </div>
+    </div>
+
+    <!-- Bottom Center Panel: Mode & Sim Controls -->
+    <div id="bottom-panel" class="ui-panel bottom-4 left-1/2 -translate-x-1/2 flex gap-4 p-3 items-center">
+        <button id="build-mode-btn" class="control-button active px-6 py-2 rounded-md font-bold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-4-3-5l-4.5-4.5-4.5 4.5c-2 1-3 3-3 5a7 7 0 0 0 7 7z"/></svg>
+            Build
+        </button>
+        <button id="test-mode-btn" class="control-button px-6 py-2 rounded-md font-bold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.66 4.96a1.32 1.32 0 0 0-1.2.14L3.14 9.42a1.32 1.32 0 0 0-.14 2.39l3.54 2.05 2.05 3.54a1.32 1.32 0 0 0 2.39-.14l4.32-6.32a1.32 1.32 0 0 0 .14-1.2L13.05 3.4a1.32 1.32 0 0 0-2.39 1.56Z"/><path d="m13.5 13.5 7 7"/></svg>
+            Simulate
+        </button>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+        import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+        
+        // CANNON is now available globally from the script loaded in the <head>
+
+        class BattleBotsGame {
+            constructor() {
+                this.initEngine();
+                this.initPhysics();
+                this.initScene();
+                this.initUI();
+                this.initControls();
+                this.initEventListeners();
+                this.animate();
+            }
+
+            initEngine() {
+                // --- Core Renderer ---
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
+                this.camera.position.set(15, 12, 25);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.outputEncoding = THREE.sRGBEncoding;
+                this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                this.renderer.toneMappingExposure = 1.2;
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                document.getElementById('canvas-container').appendChild(this.renderer.domElement);
+                
+                // --- Post-Processing ---
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(new RenderPass(this.scene, this.camera));
+                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.7, 0.5, 0.2);
+                this.composer.addPass(bloomPass);
+                this.fxaaPass = new ShaderPass(FXAAShader);
+                this.fxaaPass.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * this.renderer.getPixelRatio());
+                this.fxaaPass.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * this.renderer.getPixelRatio());
+                this.composer.addPass(this.fxaaPass);
+
+                this.clock = new THREE.Clock();
+                this.robotParts = [];
+                this.constraints = [];
+            }
+
+            initPhysics() {
+                // --- Cannon.js World ---
+                this.world = new CANNON.World();
+                this.world.gravity.set(0, -20, 0); // Stronger gravity
+                this.world.broadphase = new CANNON.SAPBroadphase(this.world);
+                this.world.solver.iterations = 15;
+                
+                // --- Materials ---
+                this.physicsMaterials = {
+                    ground: new CANNON.Material('ground'),
+                    metal: new CANNON.Material('metal'),
+                    wood: new CANNON.Material('wood'),
+                    rubber: new CANNON.Material('rubber'),
+                };
+                
+                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.metal, { friction: 0.3, restitution: 0.1 }));
+                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.wood, { friction: 0.5, restitution: 0.4 }));
+                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.rubber, { friction: 0.8, restitution: 0.5 }));
+                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.metal, { friction: 0.2, restitution: 0.2 }));
+            }
+            
+            initScene() {
+                this.scene.background = new THREE.Color(0x111827);
+                this.scene.fog = new THREE.FogExp2(0x111827, 0.015);
+                
+                // --- Lighting ---
+                this.scene.add(new THREE.AmbientLight(0x404040, 0.5));
+                
+                const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                keyLight.position.set(20, 40, 30);
+                keyLight.castShadow = true;
+                keyLight.shadow.mapSize.width = 4096;
+                keyLight.shadow.mapSize.height = 4096;
+                keyLight.shadow.camera.near = 0.5;
+                keyLight.shadow.camera.far = 100;
+                keyLight.shadow.camera.left = -50;
+                keyLight.shadow.camera.right = 50;
+                keyLight.shadow.camera.top = 50;
+                keyLight.shadow.camera.bottom = -50;
+                this.scene.add(keyLight);
+                
+                const fillLight = new THREE.DirectionalLight(0x8899ff, 0.5);
+                fillLight.position.set(-20, 10, -30);
+                this.scene.add(fillLight);
+
+                const rimLight = new THREE.SpotLight(0xff88cc, 3);
+                rimLight.position.set(0, 20, -50);
+                rimLight.angle = Math.PI / 8;
+                rimLight.penumbra = 0.3;
+                this.scene.add(rimLight);
+
+                // --- Environment ---
+                const groundGeo = new THREE.PlaneGeometry(200, 200);
+                const groundMat = new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.7, metalness: 0.1 });
+                const ground = new THREE.Mesh(groundGeo, groundMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+                
+                const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: this.physicsMaterials.ground });
+                groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+                this.world.addBody(groundBody);
+                
+                // Environment grid
+                const grid = new THREE.GridHelper(200, 100, 0x4f46e5, 0x444444);
+                grid.material.opacity = 0.3;
+                grid.material.transparent = true;
+                this.scene.add(grid);
+            }
+
+            initUI() {
+                this.partsData = {
+                    // Chassis
+                    'core_block': { name: 'Power Core', type: 'chassis', size: [1, 1, 1], mass: 10, color: 0x3B82F6, material: 'metal', health: 500, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`},
+                    'metal_beam': { name: 'Metal Beam', type: 'chassis', size: [4, 0.5, 0.5], mass: 8, color: 0x6B7280, material: 'metal', health: 250, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`},
+                    // ... other parts
+                };
+                
+                const inventoryEl = document.getElementById('inventory-parts');
+                inventoryEl.innerHTML = '';
+                for (const id in this.partsData) {
+                    const part = this.partsData[id];
+                    const item = document.createElement('div');
+                    item.className = 'flex items-center p-2 bg-gray-700 rounded-md cursor-pointer hover:bg-gray-600 transition-colors';
+                    item.innerHTML = `
+                        <div class="w-8 h-8 flex-shrink-0 mr-3 text-white">${part.icon}</div>
+                        <span>${part.name}</span>
+                    `;
+                    item.addEventListener('click', () => this.addPart(id));
+                    inventoryEl.appendChild(item);
+                }
+
+                this.inspectorContent = document.getElementById('inspector-content');
+                
+                // Buttons
+                this.buildModeBtn = document.getElementById('build-mode-btn');
+                this.testModeBtn = document.getElementById('test-mode-btn');
+                this.toolSelectBtn = document.getElementById('tool-select');
+                this.toolRotateBtn = document.getElementById('tool-rotate');
+                this.toolDeleteBtn = document.getElementById('tool-delete');
+            }
+
+            initControls() {
+                this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.orbitControls.enablePan = true;
+                this.orbitControls.minDistance = 5;
+                this.orbitControls.maxDistance = 100;
+                this.orbitControls.target.set(0, 2, 0);
+                this.orbitControls.update();
+
+                this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+                this.transformControls.addEventListener('dragging-changed', (event) => {
+                    this.orbitControls.enabled = !event.value;
+                    if (!event.value) { // On drag end
+                        this.updatePhysicsBody(this.transformControls.object);
+                    }
+                });
+                this.scene.add(this.transformControls);
+
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+            }
+
+            initEventListeners() {
+                window.addEventListener('resize', () => this.onWindowResize());
+                window.addEventListener('keydown', (e) => this.onKeyDown(e));
+                this.renderer.domElement.addEventListener('mousedown', (e) => this.onMouseDown(e), false);
+
+                this.buildModeBtn.addEventListener('click', () => this.setMode('build'));
+                this.testModeBtn.addEventListener('click', () => this.setMode('test'));
+                this.toolSelectBtn.addEventListener('click', () => this.setTool('translate'));
+                this.toolRotateBtn.addEventListener('click', () => this.setTool('rotate'));
+            }
+
+            // --- Core Logic ---
+
+            addPart(partId) {
+                if (this.mode !== 'build') return;
+                const data = this.partsData[partId];
+
+                // --- Mesh ---
+                const geo = new THREE.BoxGeometry(...data.size);
+                const mat = new THREE.MeshStandardMaterial({
+                    color: data.color,
+                    roughness: data.material === 'metal' ? 0.3 : 0.8,
+                    metalness: data.material === 'metal' ? 0.8 : 0.1,
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.position.set(0, 5, 0);
+
+                // --- Physics Body ---
+                const shape = new CANNON.Box(new CANNON.Vec3(...data.size.map(s => s / 2)));
+                const body = new CANNON.Body({
+                    mass: data.mass,
+                    position: new CANNON.Vec3().copy(mesh.position),
+                    shape: shape,
+                    material: this.physicsMaterials[data.material]
+                });
+
+                mesh.userData.body = body;
+                body.userData = { mesh: mesh, id: THREE.MathUtils.generateUUID(), partId };
+                this.scene.add(mesh);
+                this.world.addBody(body);
+                this.robotParts.push(mesh);
+                this.selectPart(mesh);
+            }
+            
+            selectPart(mesh) {
+                if(this.selectedPart === mesh) return;
+
+                if (this.mode === 'build') {
+                    this.transformControls.attach(mesh);
+                    this.selectedPart = mesh;
+                    this.updateInspector(mesh);
+                }
+            }
+
+            updatePhysicsBody(mesh) {
+                if (mesh && mesh.userData.body) {
+                    mesh.userData.body.position.copy(mesh.position);
+                    mesh.userData.body.quaternion.copy(mesh.quaternion);
+                }
+            }
+
+            updateInspector(mesh) {
+                if (!mesh) {
+                    this.inspectorContent.innerHTML = `<p class="text-gray-400 text-center italic mt-4">Select a part to inspect.</p>`;
+                    return;
+                }
+                const partData = this.partsData[mesh.userData.body.userData.partId];
+                this.inspectorContent.innerHTML = `
+                    <div class="space-y-3">
+                        <h3 class="text-xl font-bold text-white">${partData.name}</h3>
+                        <div><strong>Mass:</strong> <span class="text-gray-300">${partData.mass} kg</span></div>
+                        <div><strong>Health:</strong> <span class="text-gray-300">${partData.health} / ${partData.health}</span></div>
+                        <div><strong>Material:</strong> <span class="text-gray-300 capitalize">${partData.material}</span></div>
+                    </div>
+                `;
+            }
+
+            setMode(newMode) {
+                this.mode = newMode;
+                if (this.mode === 'build') {
+                    this.buildModeBtn.classList.add('active');
+                    this.testModeBtn.classList.remove('active');
+                    this.transformControls.enabled = true;
+                    if(this.selectedPart) this.transformControls.attach(this.selectedPart);
+
+                    // Reset physics states
+                    this.robotParts.forEach(mesh => {
+                        const body = mesh.userData.body;
+                        body.position.copy(mesh.userData.initialPosition || mesh.position);
+                        body.quaternion.copy(mesh.userData.initialRotation || mesh.quaternion);
+                        body.velocity.set(0,0,0);
+                        body.angularVelocity.set(0,0,0);
+                    });
+                } else { // test mode
+                    this.buildModeBtn.classList.remove('active');
+                    this.testModeBtn.classList.add('active');
+                    this.transformControls.detach();
+                    this.transformControls.enabled = false;
+                    
+                    // Save initial state for reset
+                    this.robotParts.forEach(mesh => {
+                        mesh.userData.initialPosition = mesh.position.clone();
+                        mesh.userData.initialRotation = mesh.quaternion.clone();
+                    });
+                }
+            }
+
+            setTool(tool) {
+                this.transformControls.setMode(tool);
+                this.toolSelectBtn.classList.toggle('active', tool === 'translate');
+                this.toolRotateBtn.classList.toggle('active', tool === 'rotate');
+            }
+            
+            // --- Event Handlers ---
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.composer.setSize(window.innerWidth, window.innerHeight);
+                this.fxaaPass.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * this.renderer.getPixelRatio());
+                this.fxaaPass.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * this.renderer.getPixelRatio());
+            }
+
+            onMouseDown(event) {
+                 if (event.target.closest('.ui-panel')) return; // Ignore UI clicks
+
+                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                
+                const intersects = this.raycaster.intersectObjects(this.robotParts);
+
+                if (intersects.length > 0) {
+                    if (!this.transformControls.dragging) {
+                        this.selectPart(intersects[0].object);
+                    }
+                } else {
+                    if (this.mode === 'build' && !this.transformControls.dragging) {
+                        this.transformControls.detach();
+                        this.selectedPart = null;
+                        this.updateInspector(null);
+                    }
+                }
+            }
+
+            onKeyDown(event) {
+                if (this.mode !== 'build') return;
+                switch (event.code) {
+                    case 'KeyQ': this.setTool('translate'); break;
+                    case 'KeyE': this.setTool('rotate'); break;
+                    case 'Delete': 
+                        if (this.selectedPart) {
+                            const partToDelete = this.selectedPart;
+                            this.transformControls.detach();
+                            this.scene.remove(partToDelete);
+                            this.world.remove(partToDelete.userData.body);
+                            this.robotParts = this.robotParts.filter(p => p !== partToDelete);
+                            this.selectedPart = null;
+                            this.updateInspector(null);
+                        }
+                        break;
+                }
+            }
+            
+            // --- Loop ---
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const deltaTime = this.clock.getDelta();
+                
+                if (this.mode === 'test') {
+                    this.world.step(1 / 60, deltaTime, 3);
+                    this.robotParts.forEach(mesh => {
+                        mesh.position.copy(mesh.userData.body.position);
+                        mesh.quaternion.copy(mesh.userData.body.quaternion);
+                    });
+                } else {
+                    this.orbitControls.update();
+                }
+
+                this.composer.render();
+            }
+        }
+
+        window.onload = () => new BattleBotsGame();
+
+    </script>
+</body>
+</html>

@@ -1,505 +1,1063 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project: Chimera - 3D Battle Bots</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;700&display=swap" rel="stylesheet">
-    <!-- Load Cannon.js library globally -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-    <style>
-        body {
-            font-family: 'Exo 2', sans-serif;
-            background-color: #111827;
-            color: #E5E7EB;
-            overflow: hidden;
-        }
-        #canvas-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-        }
-        canvas {
-            display: block;
-        }
-        .ui-panel {
-            position: absolute;
-            z-index: 10;
-            background-color: rgba(17, 24, 39, 0.8);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(55, 65, 81, 0.5);
-            border-radius: 0.75rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            transition: all 0.3s ease-in-out;
-        }
-        .control-button {
-            transition: all 0.2s ease-in-out;
-            border: 1px solid transparent;
-        }
-        .control-button:hover {
-            transform: translateY(-2px);
-            background-color: #374151;
-            border-color: #4f5b70;
-        }
-        .control-button.active {
-            background-color: #3B82F6;
-            color: white;
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
-        }
-        /* Custom scrollbar for UI panels */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: rgba(55, 65, 81, 0.5);
-            border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #6B7280;
-            border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #9CA3AF;
-        }
-    </style>
-</head>
-<body class="antialiased">
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import * as CANNON from 'cannon-es';
+import CannonDebugger from 'cannon-es-debugger'; // Keep for debugging if needed
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, where, deleteDoc } from "firebase/firestore";
 
-    <div id="canvas-container"></div>
+import {
+    ChevronDown, ChevronUp, Swords, Wrench, X, Menu, Bot, Coins, Weight, Square,
+    RotateCw, Trash2, Save, TestTube2, Heart, Shield, Timer, Loader2, ArrowLeft
+} from 'lucide-react';
 
-    <!-- Left Side Panel: Inventory & Tools -->
-    <div id="left-panel" class="ui-panel top-4 left-4 w-72 flex flex-col h-[calc(100vh-2rem)]">
-        <div class="p-4 border-b border-gray-700">
-            <h1 class="text-2xl font-bold text-white tracking-wider">Project: Chimera</h1>
-            <p class="text-xs text-gray-400">Advanced Robotics Workshop</p>
+// --- FIREBASE CONFIGURATION ---
+// IMPORTANT: This configuration is a placeholder. In a real application,
+// you would replace this with your actual Firebase project configuration.
+// The __firebase_config global variable will be provided in the runtime environment.
+const firebaseConfig = typeof __firebase_config !== 'undefined'
+    ? JSON.parse(__firebase_config)
+    : {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_AUTH_DOMAIN",
+        projectId: "YOUR_PROJECT_ID",
+        storageBucket: "YOUR_STORAGE_BUCKET",
+        messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+
+// --- DATA DEFINITIONS ---
+const PART_DEFINITIONS = {
+    chassis: {
+        id: 'chassis',
+        name: 'Chassis',
+        icon: <Square size={24} />,
+        items: {
+            chassis_light: { name: 'Light Chassis', weight: 5, cost: 150, armor: 15, health: 80, power: 10, description: 'Fast and agile, perfect for hit-and-run tactics.', geometry: { type: 'box', size: [2, 0.4, 3] }, color: 0x9D9D9D, attachmentPoints: [{ pos: [0, 0.2, 0.8], type: ['weapon', 'utility'] }, { pos: [0, 0.2, -0.8], type: ['utility'] }] },
+            chassis_medium: { name: 'Medium Chassis', weight: 12, cost: 300, armor: 30, health: 120, power: 20, description: 'Balanced design for versatile combat.', geometry: { type: 'box', size: [2.5, 0.5, 3.5] }, color: 0x808080, attachmentPoints: [{ pos: [0, 0.25, 1], type: ['weapon'] }, { pos: [0.8, 0.25, -0.5], type: ['utility'] }, { pos: [-0.8, 0.25, -0.5], type: ['utility'] }] },
+            chassis_heavy: { name: 'Heavy Chassis', weight: 25, cost: 500, armor: 50, health: 200, power: 15, description: 'Maximum protection and stability.', geometry: { type: 'box', size: [3, 0.6, 4] }, color: 0x6A6A6A, attachmentPoints: [{ pos: [0, 0.3, 1.2], type: ['weapon', 'heavy_weapon'] }, { pos: [1, 0.3, 0], type: ['weapon'] }, { pos: [-1, 0.3, 0], type: ['weapon'] }, { pos: [0, 0.3, -1.2], type: ['utility'] }] },
+            chassis_wedge: { name: 'Wedge Chassis', weight: 18, cost: 400, armor: 35, health: 150, power: 18, description: 'Wedge design for getting under opponents.', geometry: { type: 'wedge', size: [2.5, 0.5, 3] }, color: 0x7B7B8F, attachmentPoints: [{ pos: [0, 0.25, 0], type: ['weapon'] }] },
+        }
+    },
+    weapons: {
+        id: 'weapons',
+        name: 'Weapons',
+        icon: <Swords size={24} />,
+        items: {
+            weapon_saw: { name: 'Buzzsaw', type: 'weapon', weight: 8, cost: 400, power: 25, damage: 35, description: 'High-speed spinning blade for continuous damage.', geometry: { type: 'cylinder', size: [1.2, 0.1, 16] }, color: 0xAAAAAA },
+            weapon_hammer: { name: 'War Hammer', type: 'heavy_weapon', weight: 15, cost: 600, power: 40, damage: 60, description: 'Pneumatic hammer for devastating single hits.', geometry: { type: 'box', size: [0.8, 0.8, 0.8] }, color: 0x444444 },
+            weapon_flipper: { name: 'Launcher Arm', type: 'weapon', weight: 12, cost: 700, power: 35, damage: 30, description: 'Powerful flipper to launch opponents airborne.', geometry: { type: 'box', size: [1.5, 0.2, 2] }, color: 0x5555AA },
+        }
+    },
+    mobility: {
+        id: 'mobility',
+        name: 'Mobility',
+        icon: <Bot size={24} />,
+        items: {
+            mobility_wheels: { name: 'High-Speed Wheels', type: 'mobility', weight: 3, cost: 120, speed: 25, traction: 0.8, description: 'High-speed wheels for maximum agility.', geometry: { type: 'cylinder', size: [0.5, 0.3, 16] }, color: 0x222222 },
+            mobility_treads: { name: 'Tank Treads', type: 'mobility', weight: 8, cost: 200, speed: 15, traction: 1.2, description: 'Tank treads for superior grip and stability.', geometry: { type: 'box', size: [2, 0.4, 0.8] }, color: 0x333333 },
+        }
+    },
+};
+
+// Flattened parts map for easy lookup
+const ALL_PARTS = Object.values(PART_DEFINITIONS).reduce((acc, category) => {
+    Object.entries(category.items).forEach(([key, value]) => {
+        acc[key] = { ...value, categoryId: category.id };
+    });
+    return acc;
+}, {});
+
+
+// --- CORE SYSTEMS & STATE MANAGEMENT ---
+const calculateBotStats = (parts) => {
+    const stats = { weight: 0, cost: 0, power: 0, armor: 0, speed: 0, damage: 0, maxHealth: 0, parts: parts.length };
+    if (!parts || parts.length === 0) return stats;
+
+    let baseHealth = 100; // All bots start with a base health
+    let chassisHealth = 0;
+
+    parts.forEach(part => {
+        const def = ALL_PARTS[part.key];
+        if (def) {
+            stats.weight += def.weight || 0;
+            stats.cost += def.cost || 0;
+            stats.power += def.power || 0;
+            stats.armor += def.armor || 0;
+            stats.speed += def.speed || 0;
+            stats.damage += def.damage || 0;
+            if(def.categoryId === 'chassis') {
+                chassisHealth += def.health || 0;
+            }
+        }
+    });
+    stats.maxHealth = baseHealth + chassisHealth;
+    return stats;
+};
+
+const useGame = () => {
+    const [gameState, setGameState] = useState({
+        currentBot: null, // { id, name, parts, stats }
+        savedBots: [],
+        currentView: 'main_menu',
+        isLoading: true,
+        modal: { isOpen: false, title: '', content: null }
+    });
+
+    const [firebase, setFirebase] = useState(null);
+
+    useEffect(() => {
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'dev-app';
+        
+        setFirebase({ app, auth, db, appId });
+
+        // Sign in and fetch initial data
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                setGameState(prev => ({ ...prev, userId: user.uid }));
+                await fetchBots(db, user.uid, appId);
+            } else {
+                await signInAnonymously(auth);
+            }
+             setGameState(prev => ({ ...prev, isLoading: false }));
+        });
+    }, []);
+
+    const fetchBots = async (db, userId, appId) => {
+        if (!db || !userId) return;
+        setGameState(prev => ({ ...prev, isLoading: true }));
+        const botsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/bots`);
+        const q = query(botsCollectionRef);
+        const querySnapshot = await getDocs(q);
+        const bots = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                parts: data.parts.map(p => ({
+                    ...p,
+                    // Deserialize arrays back into THREE.js objects
+                    pos: new THREE.Vector3().fromArray(p.pos),
+                    quat: new THREE.Quaternion().fromArray(p.quat),
+                }))
+            };
+        });
+        setGameState(prev => ({ ...prev, savedBots: bots, isLoading: false }));
+    };
+
+    const saveCurrentBot = async (botName) => {
+        if (!firebase || !gameState.userId || !gameState.currentBot) return;
+        setGameState(prev => ({ ...prev, isLoading: true }));
+
+        const botToSave = {
+            ...gameState.currentBot,
+            name: botName,
+            // Serialize THREE.js objects to arrays for Firestore
+            parts: gameState.currentBot.parts.map(p => ({
+                ...p,
+                pos: p.pos.toArray ? p.pos.toArray() : p.pos,
+                quat: p.quat.toArray ? p.quat.toArray() : p.quat,
+            })),
+            stats: calculateBotStats(gameState.currentBot.parts)
+        };
+        const docRef = doc(firebase.db, `artifacts/${firebase.appId}/users/${gameState.userId}/bots`, botToSave.id);
+
+        try {
+            await setDoc(docRef, botToSave, { merge: true });
+            await fetchBots(firebase.db, gameState.userId, firebase.appId);
+            setGameState(prev => ({ ...prev, isLoading: false, modal: { isOpen: false } }));
+        } catch (error) {
+            console.error("Error saving bot: ", error);
+             setGameState(prev => ({ ...prev, isLoading: false, modal: { isOpen: true, title: 'Error', content: 'Could not save your bot.' } }));
+        }
+    };
+    
+     const deleteBot = async (botId) => {
+        if (!firebase || !gameState.userId || !botId) return;
+        if (!window.confirm("Are you sure you want to delete this bot forever?")) return;
+
+        setGameState(prev => ({ ...prev, isLoading: true }));
+        const docRef = doc(firebase.db, `artifacts/${firebase.appId}/users/${gameState.userId}/bots`, botId);
+
+        try {
+            await deleteDoc(docRef);
+            await fetchBots(firebase.db, gameState.userId, firebase.appId);
+             if(gameState.currentBot?.id === botId) {
+                setGameState(prev => ({ ...prev, currentBot: null }));
+            }
+            setGameState(prev => ({ ...prev, isLoading: false, modal: { isOpen: false } }));
+        } catch (error) {
+            console.error("Error deleting bot: ", error);
+            setGameState(prev => ({ ...prev, isLoading: false, modal: { isOpen: true, title: 'Error', content: 'Could not delete your bot.' } }));
+        }
+    };
+
+    const createNewBot = () => {
+        const newBot = {
+            id: `bot_${Date.now()}`,
+            name: "New Bot",
+            parts: [],
+            stats: calculateBotStats([])
+        };
+        setGameState(prev => ({ ...prev, currentBot: newBot, currentView: 'bot_builder' }));
+    };
+
+    const loadBot = (botId) => {
+        const botToLoad = gameState.savedBots.find(b => b.id === botId);
+        if(botToLoad) {
+            setGameState(prev => ({...prev, currentBot: botToLoad, currentView: 'bot_builder'}));
+        }
+    };
+    
+    const updateCurrentBot = (newParts) => {
+         setGameState(prev => {
+            if (!prev.currentBot) return prev;
+            const updatedBot = {
+                ...prev.currentBot,
+                parts: newParts,
+                stats: calculateBotStats(newParts)
+            };
+            return { ...prev, currentBot: updatedBot };
+        });
+    }
+
+    const setView = (view) => setGameState(prev => ({ ...prev, currentView: view }));
+    
+    const showModal = (title, content) => setGameState(prev => ({ ...prev, modal: { isOpen: true, title, content } }));
+    const hideModal = () => setGameState(prev => ({ ...prev, modal: { ...prev.modal, isOpen: false } }));
+
+    return { gameState, firebase, setView, createNewBot, loadBot, updateCurrentBot, saveCurrentBot, deleteBot, showModal, hideModal };
+};
+
+// --- UI COMPONENTS ---
+
+const Modal = ({ modal, onConfirm, onCancel }) => {
+    if (!modal.isOpen) return null;
+    return (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="bg-gray-900 border-2 border-cyan-400/50 rounded-2xl p-8 max-w-lg w-full shadow-2xl shadow-cyan-500/20">
+                <h2 className="text-2xl font-bold text-white mb-4" style={{ fontFamily: "'Orbitron', sans-serif" }}>{modal.title}</h2>
+                <div className="text-gray-300">{modal.content}</div>
+                <div className="flex justify-end gap-4 mt-6">
+                    {onCancel && <button onClick={onCancel} className="menu-button bg-gray-600">Cancel</button>}
+                    {onConfirm && <button onClick={onConfirm} className="menu-button bg-cyan-500">Confirm</button>}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SaveBotModal = ({ bot, onSave, onCancel }) => (
+     <div className="space-y-4">
+        <p>Enter a name for your bot.</p>
+        <input 
+            type="text" 
+            defaultValue={bot.name}
+            id="botNameInput"
+            className="w-full p-2 bg-gray-800 border border-gray-600 rounded-md text-white"
+        />
+        <div className="flex justify-end gap-4 mt-6">
+            <button onClick={onCancel} className="menu-button bg-gray-600">Cancel</button>
+            <button 
+                onClick={() => {
+                    const name = document.getElementById('botNameInput').value;
+                    if(name) onSave(name);
+                }} 
+                className="menu-button bg-cyan-500"
+            >
+                Save
+            </button>
+        </div>
+    </div>
+);
+
+
+const MainMenu = ({ onStartBuilder, onOpenGarage }) => (
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-md text-center bg-black/80 backdrop-blur-md p-8 md:p-12 rounded-2xl border-2 border-cyan-400/50 shadow-2xl shadow-cyan-500/20">
+            <h1 className="text-5xl md:text-6xl font-bold mb-2 uppercase" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                <span className="bg-gradient-to-r from-cyan-400 to-purple-500 text-transparent bg-clip-text">Battle Bots</span>
+                <span className="text-white"> 3D</span>
+            </h1>
+            <p className="text-lg text-gray-400 mb-10 font-light">ULTIMATE COMBAT ARENA</p>
+            <div className="space-y-4">
+                <button onClick={onStartBuilder} className="w-full menu-button bg-gradient-to-r from-cyan-500 to-blue-500">
+                    <Wrench className="inline-block mr-2" /> New Bot
+                </button>
+                <button onClick={onOpenGarage} className="w-full menu-button bg-gradient-to-r from-purple-500 to-pink-500">
+                    <Bot className="inline-block mr-2" /> Garage
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
+const GarageView = ({ bots, onLoad, onCreate, onDelete, onBack }) => (
+    <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl text-white bg-black/80 backdrop-blur-md p-8 rounded-2xl border-2 border-purple-400/50 shadow-2xl shadow-purple-500/20">
+            <div className="flex justify-between items-center border-b-2 border-purple-400/50 pb-4 mb-4">
+                 <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 transition"><ArrowLeft size={24}/></button>
+                 <h1 className="text-4xl font-bold uppercase" style={{ fontFamily: "'Orbitron', sans-serif" }}>Garage</h1>
+                 <div className="w-10"></div>
+            </div>
+           
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                {bots.length > 0 ? bots.map(bot => (
+                    <div key={bot.id} className="flex items-center justify-between p-4 bg-white/5 rounded-lg hover:bg-white/10 transition">
+                        <div>
+                            <h3 className="text-xl font-bold">{bot.name}</h3>
+                            <p className="text-sm text-gray-400">Parts: {bot.parts.length}, Weight: {bot.stats.weight}</p>
+                        </div>
+                        <div className="flex gap-2">
+                             <button onClick={() => onDelete(bot.id)} className="builder-button bg-red-500/80 hover:bg-red-500"><Trash2 size={16}/></button>
+                            <button onClick={() => onLoad(bot.id)} className="builder-button bg-cyan-500/80 hover:bg-cyan-500">Load</button>
+                        </div>
+                    </div>
+                )) : (
+                    <p className="text-center text-gray-400 py-8">You have no saved bots. Go create one!</p>
+                )}
+            </div>
+             <button onClick={onCreate} className="w-full mt-6 menu-button bg-gradient-to-r from-cyan-500 to-blue-500">
+                <Wrench className="inline-block mr-2" /> Build a New Bot
+            </button>
+        </div>
+    </div>
+);
+
+
+const PartCategory = ({ category }) => {
+    const [isOpen, setIsOpen] = useState(true);
+    return (
+        <div className="bg-white/5 rounded-lg border border-cyan-400/20 overflow-hidden transition-all duration-300">
+            <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4 bg-white/10 hover:bg-white/20 transition">
+                <div className="flex items-center gap-3"><span className="text-cyan-400">{category.icon}</span><h3 className="font-bold text-lg uppercase tracking-wider">{category.name}</h3></div>
+                {isOpen ? <ChevronUp /> : <ChevronDown />}
+            </button>
+            {isOpen && <div className="p-4 space-y-3">{Object.entries(category.items).map(([partKey, part]) => (
+                <div 
+                    key={partKey} 
+                    draggable 
+                    onDragStart={(e) => {
+                        // Transfer the part's unique key as plain text for robustness.
+                        e.dataTransfer.setData("text/plain", partKey);
+                    }} 
+                    className="p-3 bg-black/40 rounded-md cursor-grab active:cursor-grabbing hover:bg-cyan-400/20 group border border-transparent hover:border-cyan-400/50 transition">
+                        <h4 className="font-bold text-white">{part.name}</h4>
+                        <p className="text-xs text-gray-400 group-hover:text-gray-300 transition">{part.description}</p>
+                        <div className="flex justify-between text-xs mt-2 text-cyan-300">
+                            <span>Cost: {part.cost}</span>
+                            <span>Weight: {part.weight}</span>
+                        </div>
+                </div>
+            ))}</div>}
+        </div>
+    );
+};
+
+
+const PartPalette = ({ onClear, onTest, onSave, onExit }) => (
+    <div className="h-full w-full bg-black/80 backdrop-blur-md p-4 flex flex-col gap-4 overflow-y-auto">
+        <div className="flex justify-between items-center border-b-2 border-cyan-400/50 pb-3">
+             <button onClick={onExit} className="p-2 rounded-full hover:bg-white/10 transition"><ArrowLeft size={20}/></button>
+            <h2 className="text-2xl font-bold text-center uppercase tracking-widest" style={{ fontFamily: "'Orbitron', sans-serif" }}>Parts</h2>
+             <div className="w-8"></div>
+        </div>
+        <div className="flex-grow space-y-4">{Object.values(PART_DEFINITIONS).map(cat => <PartCategory key={cat.id} category={cat} />)}</div>
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-cyan-400/20">
+            <button onClick={onClear} className="builder-button bg-red-500/80 hover:bg-red-500"><Trash2 size={16}/> Clear</button>
+            <button onClick={onSave} className="builder-button bg-blue-500/80 hover:bg-blue-500"><Save size={16}/> Save</button>
+            <button onClick={onTest} className="col-span-2 builder-button bg-green-500/80 hover:bg-green-500"><TestTube2 size={16}/> Test in Arena</button>
+        </div>
+    </div>
+);
+
+const StatBar = ({ label, value, max, icon, colorClass = "from-cyan-400 to-blue-500" }) => (
+    <div>
+        <div className="flex justify-between items-center text-sm mb-1">
+            <div className="flex items-center gap-2 text-cyan-300">{icon}<span className="font-bold uppercase tracking-wider">{label}</span></div>
+            <span className="text-white font-mono">{value} / {max}</span>
+        </div>
+        <div className="w-full bg-black/50 rounded-full h-2.5 border border-white/10"><div className={`bg-gradient-to-r ${colorClass} h-full rounded-full transition-all duration-500`} style={{ width: `${Math.min((value / max) * 100, 100)}%` }}></div></div>
+    </div>
+);
+
+const BotStats = ({ bot }) => (
+    <div className="w-full bg-black/80 backdrop-blur-md p-4 rounded-lg border border-cyan-400/20">
+        <h2 className="text-xl font-bold text-center uppercase tracking-widest border-b-2 border-cyan-400/50 pb-2 mb-4" style={{ fontFamily: "'Orbitron', sans-serif" }}>{bot?.name || "Bot Stats"}</h2>
+        {bot ? (<div className="space-y-4">
+            <StatBar label="Health" value={bot.stats.maxHealth} max={500} icon={<Heart size={16}/>} colorClass="from-green-400 to-cyan-500" />
+            <StatBar label="Weight" value={bot.stats.weight} max={120} icon={<Weight size={16}/>} colorClass="from-orange-400 to-red-500" />
+            <StatBar label="Cost" value={bot.stats.cost} max={5000} icon={<Coins size={16}/>} colorClass="from-yellow-400 to-orange-500" />
+            <StatBar label="Armor" value={bot.stats.armor} max={200} icon={<Shield size={16}/>} colorClass="from-blue-400 to-purple-500" />
+        </div>) : <p className="text-center text-gray-400">No bot loaded.</p>}
+    </div>
+);
+
+const HealthBar = ({ name, health, maxHealth, isPlayer }) => (
+    <div className={`w-full max-w-sm p-3 rounded-lg border-2 ${isPlayer ? 'border-cyan-400' : 'border-red-500'} bg-black/70`}>
+        <div className="flex justify-between items-center mb-1">
+            <span className="font-bold uppercase text-white tracking-wider">{name}</span>
+            <span className="font-mono text-white">{Math.max(0, Math.ceil(health))}/{maxHealth}</span>
+        </div>
+        <div className="w-full bg-gray-700 rounded-full h-4 border border-black/50">
+            <div className={`h-full rounded-full transition-all duration-300 ${isPlayer ? 'bg-gradient-to-r from-cyan-400 to-blue-500' : 'bg-gradient-to-r from-red-500 to-orange-500'}`} style={{ width: `${(Math.max(0, health) / maxHealth) * 100}%` }}></div>
+        </div>
+    </div>
+);
+
+const BattleHUD = ({ battleState, onExit }) => (
+    <div className="absolute inset-0 p-4 pointer-events-none flex flex-col justify-between">
+        <div className="flex flex-col md:flex-row justify-center gap-4">
+            <HealthBar name={battleState.player.name} health={battleState.player.health} maxHealth={battleState.player.maxHealth} isPlayer={true} />
+            <HealthBar name={battleState.enemy.name} health={battleState.enemy.health} maxHealth={battleState.enemy.maxHealth} isPlayer={false} />
         </div>
         
-        <!-- Tools -->
-        <div class="p-4 border-b border-gray-700">
-            <h2 class="text-lg font-semibold mb-3">Build Tools</h2>
-            <div class="grid grid-cols-3 gap-2">
-                <button id="tool-select" title="Select & Move (Q)" class="control-button active p-2 bg-gray-700 rounded-md flex justify-center items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7 19 2-7 7-2z"/></svg>
-                </button>
-                 <button id="tool-rotate" title="Rotate (E)" class="control-button p-2 bg-gray-700 rounded-md flex justify-center items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2v6h6M21.5 22v-6h-6"/><path d="M22 11.5A10 10 0 0 0 3.5 12.5"/><path d="M2 12.5a10 10 0 0 0 18.5-1"/></svg>
-                </button>
-                <button id="tool-delete" title="Delete (Del)" class="control-button p-2 bg-gray-700 rounded-md flex justify-center items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></svg>
-                </button>
-            </div>
-        </div>
+        {battleState.message && (
+             <div className="absolute inset-0 flex items-center justify-center">
+                 <div className="text-center bg-black/80 p-8 rounded-xl backdrop-blur-sm">
+                     <h2 className="text-6xl font-black text-white" style={{ fontFamily: "'Orbitron', sans-serif" }}>{battleState.message}</h2>
+                     {battleState.winner && <button onClick={onExit} className="mt-4 menu-button bg-cyan-500 pointer-events-auto">Back to Builder</button>}
+                 </div>
+             </div>
+        )}
 
-        <!-- Inventory -->
-        <div class="p-4 flex-grow overflow-y-auto custom-scrollbar">
-            <h2 class="text-lg font-semibold mb-3">Inventory</h2>
-            <div id="inventory-parts" class="space-y-2">
-                <!-- Parts will be dynamically injected here -->
+        <div className="flex justify-between items-end">
+            <button onClick={onExit} className="menu-button bg-gray-700/80 pointer-events-auto">Exit</button>
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-black/70 border-2 border-gray-600">
+                <Timer className="text-yellow-400" />
+                <span className="text-3xl text-white font-mono" style={{ textShadow: '0 0 5px #facc15' }}>{battleState.timer.toFixed(1)}</span>
             </div>
         </div>
     </div>
+);
+
+
+// --- 3D / LOGIC COMPONENTS ---
+
+const BotBuilderView = ({ bot, updateCurrentBot, onSave, onTest, onExit }) => {
+    const [isPaletteOpen, setPaletteOpen] = useState(true);
+    const builderRef = useRef();
     
-    <!-- Right Side Panel: Inspector -->
-    <div id="inspector-panel" class="ui-panel top-4 right-4 w-80 h-[calc(100vh-2rem)] flex flex-col">
-        <div class="p-4 border-b border-gray-700">
-            <h2 class="text-lg font-semibold">Inspector</h2>
-        </div>
-        <div id="inspector-content" class="p-4 flex-grow overflow-y-auto custom-scrollbar">
-            <p class="text-gray-400 text-center italic mt-4">Select a part to inspect its properties.</p>
-        </div>
-    </div>
-
-    <!-- Bottom Center Panel: Mode & Sim Controls -->
-    <div id="bottom-panel" class="ui-panel bottom-4 left-1/2 -translate-x-1/2 flex gap-4 p-3 items-center">
-        <button id="build-mode-btn" class="control-button active px-6 py-2 rounded-md font-bold flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-4-3-5l-4.5-4.5-4.5 4.5c-2 1-3 3-3 5a7 7 0 0 0 7 7z"/></svg>
-            Build
-        </button>
-        <button id="test-mode-btn" class="control-button px-6 py-2 rounded-md font-bold flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.66 4.96a1.32 1.32 0 0 0-1.2.14L3.14 9.42a1.32 1.32 0 0 0-.14 2.39l3.54 2.05 2.05 3.54a1.32 1.32 0 0 0 2.39-.14l4.32-6.32a1.32 1.32 0 0 0 .14-1.2L13.05 3.4a1.32 1.32 0 0 0-2.39 1.56Z"/><path d="m13.5 13.5 7 7"/></svg>
-            Simulate
-        </button>
-    </div>
-
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/"
+    const handleClear = () => {
+        if(window.confirm("Are you sure you want to clear this bot? All unsaved changes will be lost.")) {
+            builderRef.current?.clearAllParts();
         }
     }
-    </script>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
-        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-        import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-        import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-        
-        // CANNON is now available globally from the script loaded in the <head>
-
-        class BattleBotsGame {
-            constructor() {
-                this.initEngine();
-                this.initPhysics();
-                this.initScene();
-                this.initUI();
-                this.initControls();
-                this.initEventListeners();
-                this.animate();
-            }
-
-            initEngine() {
-                // --- Core Renderer ---
-                this.scene = new THREE.Scene();
-                this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
-                this.camera.position.set(15, 12, 25);
-                this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-                this.renderer.setSize(window.innerWidth, window.innerHeight);
-                this.renderer.setPixelRatio(window.devicePixelRatio);
-                this.renderer.outputEncoding = THREE.sRGBEncoding;
-                this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-                this.renderer.toneMappingExposure = 1.2;
-                this.renderer.shadowMap.enabled = true;
-                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-                document.getElementById('canvas-container').appendChild(this.renderer.domElement);
-                
-                // --- Post-Processing ---
-                this.composer = new EffectComposer(this.renderer);
-                this.composer.addPass(new RenderPass(this.scene, this.camera));
-                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.7, 0.5, 0.2);
-                this.composer.addPass(bloomPass);
-                this.fxaaPass = new ShaderPass(FXAAShader);
-                this.fxaaPass.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * this.renderer.getPixelRatio());
-                this.fxaaPass.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * this.renderer.getPixelRatio());
-                this.composer.addPass(this.fxaaPass);
-
-                this.clock = new THREE.Clock();
-                this.robotParts = [];
-                this.constraints = [];
-            }
-
-            initPhysics() {
-                // --- Cannon.js World ---
-                this.world = new CANNON.World();
-                this.world.gravity.set(0, -20, 0); // Stronger gravity
-                this.world.broadphase = new CANNON.SAPBroadphase(this.world);
-                this.world.solver.iterations = 15;
-                
-                // --- Materials ---
-                this.physicsMaterials = {
-                    ground: new CANNON.Material('ground'),
-                    metal: new CANNON.Material('metal'),
-                    wood: new CANNON.Material('wood'),
-                    rubber: new CANNON.Material('rubber'),
-                };
-                
-                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.metal, { friction: 0.3, restitution: 0.1 }));
-                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.wood, { friction: 0.5, restitution: 0.4 }));
-                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.rubber, { friction: 0.8, restitution: 0.5 }));
-                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.metal, { friction: 0.2, restitution: 0.2 }));
-            }
+    
+    return (
+        <div className="relative w-full h-full flex flex-col lg:flex-row bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
+            <button onClick={() => setPaletteOpen(!isPaletteOpen)} className="lg:hidden absolute top-4 left-4 z-30 p-2 bg-black/50 backdrop-blur-sm rounded-md text-white">{isPaletteOpen ? <X/> : <Menu/>}</button>
             
-            initScene() {
-                this.scene.background = new THREE.Color(0x111827);
-                this.scene.fog = new THREE.FogExp2(0x111827, 0.015);
-                
-                // --- Lighting ---
-                this.scene.add(new THREE.AmbientLight(0x404040, 0.5));
-                
-                const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
-                keyLight.position.set(20, 40, 30);
-                keyLight.castShadow = true;
-                keyLight.shadow.mapSize.width = 4096;
-                keyLight.shadow.mapSize.height = 4096;
-                keyLight.shadow.camera.near = 0.5;
-                keyLight.shadow.camera.far = 100;
-                keyLight.shadow.camera.left = -50;
-                keyLight.shadow.camera.right = 50;
-                keyLight.shadow.camera.top = 50;
-                keyLight.shadow.camera.bottom = -50;
-                this.scene.add(keyLight);
-                
-                const fillLight = new THREE.DirectionalLight(0x8899ff, 0.5);
-                fillLight.position.set(-20, 10, -30);
-                this.scene.add(fillLight);
-
-                const rimLight = new THREE.SpotLight(0xff88cc, 3);
-                rimLight.position.set(0, 20, -50);
-                rimLight.angle = Math.PI / 8;
-                rimLight.penumbra = 0.3;
-                this.scene.add(rimLight);
-
-                // --- Environment ---
-                const groundGeo = new THREE.PlaneGeometry(200, 200);
-                const groundMat = new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.7, metalness: 0.1 });
-                const ground = new THREE.Mesh(groundGeo, groundMat);
-                ground.rotation.x = -Math.PI / 2;
-                ground.receiveShadow = true;
-                this.scene.add(ground);
-                
-                const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: this.physicsMaterials.ground });
-                groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-                this.world.addBody(groundBody);
-                
-                // Environment grid
-                const grid = new THREE.GridHelper(200, 100, 0x4f46e5, 0x444444);
-                grid.material.opacity = 0.3;
-                grid.material.transparent = true;
-                this.scene.add(grid);
-            }
-
-            initUI() {
-                this.partsData = {
-                    // Chassis
-                    'core_block': { name: 'Power Core', type: 'chassis', size: [1, 1, 1], mass: 10, color: 0x3B82F6, material: 'metal', health: 500, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`},
-                    'metal_beam': { name: 'Metal Beam', type: 'chassis', size: [4, 0.5, 0.5], mass: 8, color: 0x6B7280, material: 'metal', health: 250, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`},
-                    // ... other parts
-                };
-                
-                const inventoryEl = document.getElementById('inventory-parts');
-                inventoryEl.innerHTML = '';
-                for (const id in this.partsData) {
-                    const part = this.partsData[id];
-                    const item = document.createElement('div');
-                    item.className = 'flex items-center p-2 bg-gray-700 rounded-md cursor-pointer hover:bg-gray-600 transition-colors';
-                    item.innerHTML = `
-                        <div class="w-8 h-8 flex-shrink-0 mr-3 text-white">${part.icon}</div>
-                        <span>${part.name}</span>
-                    `;
-                    item.addEventListener('click', () => this.addPart(id));
-                    inventoryEl.appendChild(item);
-                }
-
-                this.inspectorContent = document.getElementById('inspector-content');
-                
-                // Buttons
-                this.buildModeBtn = document.getElementById('build-mode-btn');
-                this.testModeBtn = document.getElementById('test-mode-btn');
-                this.toolSelectBtn = document.getElementById('tool-select');
-                this.toolRotateBtn = document.getElementById('tool-rotate');
-                this.toolDeleteBtn = document.getElementById('tool-delete');
-            }
-
-            initControls() {
-                this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
-                this.orbitControls.enablePan = true;
-                this.orbitControls.minDistance = 5;
-                this.orbitControls.maxDistance = 100;
-                this.orbitControls.target.set(0, 2, 0);
-                this.orbitControls.update();
-
-                this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
-                this.transformControls.addEventListener('dragging-changed', (event) => {
-                    this.orbitControls.enabled = !event.value;
-                    if (!event.value) { // On drag end
-                        this.updatePhysicsBody(this.transformControls.object);
-                    }
-                });
-                this.scene.add(this.transformControls);
-
-                this.raycaster = new THREE.Raycaster();
-                this.mouse = new THREE.Vector2();
-            }
-
-            initEventListeners() {
-                window.addEventListener('resize', () => this.onWindowResize());
-                window.addEventListener('keydown', (e) => this.onKeyDown(e));
-                this.renderer.domElement.addEventListener('mousedown', (e) => this.onMouseDown(e), false);
-
-                this.buildModeBtn.addEventListener('click', () => this.setMode('build'));
-                this.testModeBtn.addEventListener('click', () => this.setMode('test'));
-                this.toolSelectBtn.addEventListener('click', () => this.setTool('translate'));
-                this.toolRotateBtn.addEventListener('click', () => this.setTool('rotate'));
-            }
-
-            // --- Core Logic ---
-
-            addPart(partId) {
-                if (this.mode !== 'build') return;
-                const data = this.partsData[partId];
-
-                // --- Mesh ---
-                const geo = new THREE.BoxGeometry(...data.size);
-                const mat = new THREE.MeshStandardMaterial({
-                    color: data.color,
-                    roughness: data.material === 'metal' ? 0.3 : 0.8,
-                    metalness: data.material === 'metal' ? 0.8 : 0.1,
-                });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-                mesh.position.set(0, 5, 0);
-
-                // --- Physics Body ---
-                const shape = new CANNON.Box(new CANNON.Vec3(...data.size.map(s => s / 2)));
-                const body = new CANNON.Body({
-                    mass: data.mass,
-                    position: new CANNON.Vec3().copy(mesh.position),
-                    shape: shape,
-                    material: this.physicsMaterials[data.material]
-                });
-
-                mesh.userData.body = body;
-                body.userData = { mesh: mesh, id: THREE.MathUtils.generateUUID(), partId };
-                this.scene.add(mesh);
-                this.world.addBody(body);
-                this.robotParts.push(mesh);
-                this.selectPart(mesh);
-            }
+            <div className={`absolute lg:static top-0 left-0 h-full z-20 transition-transform duration-300 ease-in-out w-full max-w-sm lg:w-1/4 lg:max-w-xs ${isPaletteOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+                <PartPalette onClear={handleClear} onTest={onTest} onSave={onSave} onExit={onExit} />
+            </div>
             
-            selectPart(mesh) {
-                if(this.selectedPart === mesh) return;
-
-                if (this.mode === 'build') {
-                    this.transformControls.attach(mesh);
-                    this.selectedPart = mesh;
-                    this.updateInspector(mesh);
-                }
-            }
-
-            updatePhysicsBody(mesh) {
-                if (mesh && mesh.userData.body) {
-                    mesh.userData.body.position.copy(mesh.position);
-                    mesh.userData.body.quaternion.copy(mesh.quaternion);
-                }
-            }
-
-            updateInspector(mesh) {
-                if (!mesh) {
-                    this.inspectorContent.innerHTML = `<p class="text-gray-400 text-center italic mt-4">Select a part to inspect.</p>`;
-                    return;
-                }
-                const partData = this.partsData[mesh.userData.body.userData.partId];
-                this.inspectorContent.innerHTML = `
-                    <div class="space-y-3">
-                        <h3 class="text-xl font-bold text-white">${partData.name}</h3>
-                        <div><strong>Mass:</strong> <span class="text-gray-300">${partData.mass} kg</span></div>
-                        <div><strong>Health:</strong> <span class="text-gray-300">${partData.health} / ${partData.health}</span></div>
-                        <div><strong>Material:</strong> <span class="text-gray-300 capitalize">${partData.material}</span></div>
-                    </div>
-                `;
-            }
-
-            setMode(newMode) {
-                this.mode = newMode;
-                if (this.mode === 'build') {
-                    this.buildModeBtn.classList.add('active');
-                    this.testModeBtn.classList.remove('active');
-                    this.transformControls.enabled = true;
-                    if(this.selectedPart) this.transformControls.attach(this.selectedPart);
-
-                    // Reset physics states
-                    this.robotParts.forEach(mesh => {
-                        const body = mesh.userData.body;
-                        body.position.copy(mesh.userData.initialPosition || mesh.position);
-                        body.quaternion.copy(mesh.userData.initialRotation || mesh.quaternion);
-                        body.velocity.set(0,0,0);
-                        body.angularVelocity.set(0,0,0);
-                    });
-                } else { // test mode
-                    this.buildModeBtn.classList.remove('active');
-                    this.testModeBtn.classList.add('active');
-                    this.transformControls.detach();
-                    this.transformControls.enabled = false;
-                    
-                    // Save initial state for reset
-                    this.robotParts.forEach(mesh => {
-                        mesh.userData.initialPosition = mesh.position.clone();
-                        mesh.userData.initialRotation = mesh.quaternion.clone();
-                    });
-                }
-            }
-
-            setTool(tool) {
-                this.transformControls.setMode(tool);
-                this.toolSelectBtn.classList.toggle('active', tool === 'translate');
-                this.toolRotateBtn.classList.toggle('active', tool === 'rotate');
-            }
+            <div className="flex-grow h-full w-full relative">
+                <BuilderCanvas ref={builderRef} bot={bot} updateCurrentBot={updateCurrentBot} />
+            </div>
             
-            // --- Event Handlers ---
+            <div className="hidden lg:block absolute bottom-4 right-4 z-10 w-80"><BotStats bot={bot} /></div>
+            <div className="lg:hidden p-2 bg-gray-900"><BotStats bot={bot} /></div>
+        </div>
+    );
+};
 
-            onWindowResize() {
-                this.camera.aspect = window.innerWidth / window.innerHeight;
-                this.camera.updateProjectionMatrix();
-                this.renderer.setSize(window.innerWidth, window.innerHeight);
-                this.composer.setSize(window.innerWidth, window.innerHeight);
-                this.fxaaPass.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * this.renderer.getPixelRatio());
-                this.fxaaPass.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * this.renderer.getPixelRatio());
-            }
 
-            onMouseDown(event) {
-                 if (event.target.closest('.ui-panel')) return; // Ignore UI clicks
+const createPartMesh = (partData) => {
+    let geometry;
+    const material = new THREE.MeshStandardMaterial({ color: partData.color || 0xcccccc, metalness: 0.8, roughness: 0.4 });
+    const { type, size } = partData.geometry;
 
-                this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-                this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-                this.raycaster.setFromCamera(this.mouse, this.camera);
-                
-                const intersects = this.raycaster.intersectObjects(this.robotParts);
+    switch (type) {
+        case 'box':
+            geometry = new THREE.BoxGeometry(...size);
+            break;
+        case 'cylinder':
+            geometry = new THREE.CylinderGeometry(size[0], size[0], size[1], size[2]);
+            break;
+        case 'wedge':
+            const [width, height, depth] = size;
+            const shape = new THREE.Shape();
+            shape.moveTo(-width / 2, -height / 2);
+            shape.lineTo(width / 2, -height / 2);
+            shape.lineTo(width / 2, height / 2);
+            geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+            geometry.center();
+            break;
+        default:
+            geometry = new THREE.BoxGeometry(1, 1, 1);
+    }
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+};
 
-                if (intersects.length > 0) {
-                    if (!this.transformControls.dragging) {
-                        this.selectPart(intersects[0].object);
-                    }
-                } else {
-                    if (this.mode === 'build' && !this.transformControls.dragging) {
-                        this.transformControls.detach();
-                        this.selectedPart = null;
-                        this.updateInspector(null);
-                    }
-                }
-            }
+const createCannonShape = (geometry) => {
+    const { type, size } = geometry;
+    switch (type) {
+        case 'box':
+            return new CANNON.Box(new CANNON.Vec3(size[0] / 2, size[1] / 2, size[2] / 2));
+        case 'cylinder':
+            return new CANNON.Cylinder(size[0], size[0], size[1], size[2]);
+        case 'wedge': // Cannon.js doesn't have a native wedge, approximate with a Box
+            return new CANNON.Box(new CANNON.Vec3(size[0] / 2, size[1] / 2, size[2] / 2));
+        default:
+            return new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
+    }
+};
 
-            onKeyDown(event) {
-                if (this.mode !== 'build') return;
-                switch (event.code) {
-                    case 'KeyQ': this.setTool('translate'); break;
-                    case 'KeyE': this.setTool('rotate'); break;
-                    case 'Delete': 
-                        if (this.selectedPart) {
-                            const partToDelete = this.selectedPart;
-                            this.transformControls.detach();
-                            this.scene.remove(partToDelete);
-                            this.world.remove(partToDelete.userData.body);
-                            this.robotParts = this.robotParts.filter(p => p !== partToDelete);
-                            this.selectedPart = null;
-                            this.updateInspector(null);
-                        }
-                        break;
-                }
-            }
-            
-            // --- Loop ---
+const BuilderCanvas = forwardRef(({ bot, updateCurrentBot }, ref) => {
+    const mountRef = useRef(null);
+    const scene = useRef(null);
+    const camera = useRef(null);
+    const renderer = useRef(null);
+    const controls = useRef(null);
+    const raycaster = useRef(new THREE.Raycaster());
+    const mouse = useRef(new THREE.Vector2());
+    
+    // Store refs to three.js objects and bot parts
+    const botContainer = useRef(null); // A THREE.Group holding all part meshes
+    const attachmentPointMeshes = useRef([]);
 
-            animate() {
-                requestAnimationFrame(() => this.animate());
+    useImperativeHandle(ref, () => ({
+        clearAllParts: () => {
+            // Remove all parts except the chassis if it exists
+            const chassis = bot.parts.find(p => ALL_PARTS[p.key].categoryId === 'chassis');
+            updateCurrentBot(chassis ? [chassis] : []);
+        },
+    }));
 
-                const deltaTime = this.clock.getDelta();
-                
-                if (this.mode === 'test') {
-                    this.world.step(1 / 60, deltaTime, 3);
-                    this.robotParts.forEach(mesh => {
-                        mesh.position.copy(mesh.userData.body.position);
-                        mesh.quaternion.copy(mesh.userData.body.quaternion);
-                    });
-                } else {
-                    this.orbitControls.update();
-                }
+    // Rebuild the entire bot mesh when the 'bot.parts' prop changes
+    useEffect(() => {
+        if (!botContainer.current || !bot) return;
 
-                this.composer.render();
-            }
+        // Clear existing meshes
+        while (botContainer.current.children.length) {
+            botContainer.current.remove(botContainer.current.children[0]);
         }
 
-        window.onload = () => new BattleBotsGame();
+        // Re-add meshes for current parts
+        bot.parts.forEach(part => {
+            const partDef = ALL_PARTS[part.key];
+            if (partDef) {
+                const mesh = createPartMesh(partDef);
+                mesh.position.copy(part.pos);
+                mesh.quaternion.copy(part.quat);
+                mesh.userData = { partInstanceId: part.instanceId, key: part.key };
+                botContainer.current.add(mesh);
+            }
+        });
 
-    </script>
-</body>
-</html>
+        // Update attachment point visuals
+        updateAttachmentVisuals();
+
+    }, [bot]); // Depends on the whole bot object to update on part changes
+
+    // Setup the initial Three.js scene
+    useEffect(() => {
+        const currentMount = mountRef.current;
+        scene.current = new THREE.Scene();
+        scene.current.background = new THREE.Color(0x1a1a2e);
+        scene.current.fog = new THREE.Fog(0x1a1a2e, 20, 100);
+
+        camera.current = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
+        camera.current.position.set(6, 6, 6);
+
+        renderer.current = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
+        renderer.current.setPixelRatio(window.devicePixelRatio);
+        renderer.current.shadowMap.enabled = true;
+        currentMount.appendChild(renderer.current.domElement);
+
+        controls.current = new OrbitControls(camera.current, renderer.current.domElement);
+        controls.current.enableDamping = true;
+        
+        // Lighting
+        scene.current.add(new THREE.AmbientLight(0x404040, 3));
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(10, 20, 5);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.set(2048, 2048);
+        scene.current.add(directionalLight);
+
+        // Ground grid
+        const gridHelper = new THREE.GridHelper(40, 40, 0x00ffff, 0x444444);
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.3;
+        scene.current.add(gridHelper);
+        
+        // Bot container
+        botContainer.current = new THREE.Group();
+        scene.current.add(botContainer.current);
+
+        let animationFrameId;
+        const animate = () => {
+            animationFrameId = requestAnimationFrame(animate);
+            controls.current.update();
+            renderer.current.render(scene.current, camera.current);
+        };
+        animate();
+        
+        const handleResize = () => {
+            if(!currentMount) return;
+            camera.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
+            camera.current.updateProjectionMatrix();
+            renderer.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            cancelAnimationFrame(animationFrameId);
+            window.removeEventListener('resize', handleResize);
+            if(renderer.current && currentMount) {
+                 // Check if the renderer's DOM element is still a child before removing
+                if(renderer.current.domElement.parentNode === currentMount){
+                    currentMount.removeChild(renderer.current.domElement);
+                }
+            }
+        };
+    }, []);
+    
+    const updateAttachmentVisuals = () => {
+        // Clear old ones
+        attachmentPointMeshes.current.forEach(mesh => scene.current.remove(mesh));
+        attachmentPointMeshes.current = [];
+
+        if (!bot) return;
+
+        const chassisPart = bot.parts.find(p => ALL_PARTS[p.key].categoryId === 'chassis');
+        if (!chassisPart) return;
+
+        const chassisDef = ALL_PARTS[chassisPart.key];
+        if (!chassisDef.attachmentPoints) return;
+        
+        chassisDef.attachmentPoints.forEach((point, index) => {
+            const isOccupied = bot.parts.some(p => p.attachmentIndex === index);
+            if (isOccupied) return;
+
+            const geometry = new THREE.TorusGeometry(0.2, 0.05, 8, 24);
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.7, wireframe: true });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.fromArray(point.pos).add(chassisPart.pos); // Add chassis position
+            mesh.rotation.x = Math.PI / 2;
+            mesh.userData.isAttachmentPoint = true;
+            mesh.userData.attachmentIndex = index;
+            scene.current.add(mesh);
+            attachmentPointMeshes.current.push(mesh);
+        });
+    }
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        const partKey = e.dataTransfer.getData("text/plain");
+        if (!partKey) {
+            console.warn("Drop event did not contain part data.");
+            return;
+        }
+        
+        const partData = ALL_PARTS[partKey];
+        if (!partData || !bot) return;
+        
+        const rect = mountRef.current.getBoundingClientRect();
+        mouse.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.current.setFromCamera(mouse.current, camera.current);
+        
+        const isChassis = partData.categoryId === 'chassis';
+
+        if (isChassis) {
+            if (bot.parts.some(p => ALL_PARTS[p.key].categoryId === 'chassis')) {
+                 if (window.confirm("This will replace your current chassis and remove all attached parts. Continue?")) {
+                     updateCurrentBot([{
+                        key: partKey,
+                        instanceId: `part_${Date.now()}`,
+                        pos: new THREE.Vector3(0, partData.geometry.size[1]/2, 0),
+                        quat: new THREE.Quaternion(),
+                    }]);
+                }
+            } else {
+                 updateCurrentBot([{
+                    key: partKey,
+                    instanceId: `part_${Date.now()}`,
+                    pos: new THREE.Vector3(0, partData.geometry.size[1]/2, 0),
+                    quat: new THREE.Quaternion(),
+                }]);
+            }
+        } else {
+            const intersects = raycaster.current.intersectObjects(attachmentPointMeshes.current);
+            if (intersects.length > 0) {
+                const pointMesh = intersects[0].object;
+                const newPart = {
+                    key: partKey,
+                    instanceId: `part_${Date.now()}`,
+                    pos: pointMesh.position.clone(),
+                    quat: new THREE.Quaternion(),
+                    attachmentIndex: pointMesh.userData.attachmentIndex,
+                };
+                updateCurrentBot([...bot.parts, newPart]);
+            }
+        }
+    };
+
+    const handleRightClick = (e) => {
+        e.preventDefault();
+        if(!bot) return;
+
+        const rect = mountRef.current.getBoundingClientRect();
+        mouse.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.current.setFromCamera(mouse.current, camera.current);
+
+        const intersects = raycaster.current.intersectObjects(botContainer.current.children);
+
+        if (intersects.length > 0) {
+            const clickedMesh = intersects[0].object;
+            const { partInstanceId, key } = clickedMesh.userData;
+            
+            if (ALL_PARTS[key].categoryId === 'chassis') {
+                showModal("Cannot Remove Chassis", "The chassis cannot be removed directly. Drag a new chassis into the scene to replace it.");
+                setTimeout(hideModal, 3000);
+                return;
+            }
+
+            if (window.confirm("Remove this part?")) {
+                 updateCurrentBot(bot.parts.filter(p => p.instanceId !== partInstanceId));
+            }
+        }
+    };
+
+    if (!bot) {
+        return (
+            <div ref={mountRef} className="w-full h-full flex items-center justify-center text-gray-500 bg-gray-900">
+                <p>Create a new bot or load one from the Garage to start.</p>
+            </div>
+        );
+    }
+
+    return <div ref={mountRef} className="w-full h-full cursor-pointer" onDrop={handleDrop} onDragOver={(e) => e.preventDefault()} onContextMenu={handleRightClick}></div>;
+});
+
+
+const ArenaView = ({ playerBotData, setView, showModal }) => {
+    const mountRef = useRef(null);
+    const [battleState, setBattleState] =useState(null);
+    const keys = useRef({});
+
+    useEffect(() => {
+        const handleKey = (e, value) => { keys.current[e.code] = value; };
+        window.addEventListener('keydown', (e) => handleKey(e, true));
+        window.addEventListener('keyup', (e) => handleKey(e, false));
+        return () => {
+            window.removeEventListener('keydown', (e) => handleKey(e, true));
+            window.removeEventListener('keyup', (e) => handleKey(e, false));
+        };
+    }, []);
+
+    useEffect(() => {
+        const currentMount = mountRef.current;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.fog = new THREE.Fog(0x1a1a2e, 50, 200);
+
+        const camera = new THREE.PerspectiveCamera(75, currentMount.clientWidth / currentMount.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        currentMount.appendChild(renderer.domElement);
+        
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -30, 0) });
+        // const debuggerInstance = CannonDebugger(scene, world, {});
+
+        // --- Lighting ---
+        scene.add(new THREE.AmbientLight(0x404040, 3));
+        const sun = new THREE.DirectionalLight(0xffffff, 2);
+        sun.position.set(20, 30, 10);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(4096, 4096);
+        scene.add(sun);
+        
+        // --- Arena Geometry ---
+        const groundMat = new CANNON.Material({friction: 0.5, restitution: 0.1});
+        const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: groundMat });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({color: 0x222233, metalness:0.4, roughness: 0.6}));
+        floorMesh.rotation.x = -Math.PI / 2;
+        floorMesh.receiveShadow = true;
+        scene.add(floorMesh);
+
+        // --- Bot Creation Logic (Compound Body) ---
+        const createBotObject = (botData, isPlayer) => {
+            const chassisPart = botData.parts.find(p => ALL_PARTS[p.key]?.categoryId === 'chassis');
+            if (!chassisPart) {
+                console.error("Bot has no chassis!", botData);
+                return { body: new CANNON.Body(), mesh: new THREE.Group(), weapons: [], health: 1, maxHealth: 1, name: "Invalid Bot" };
+            }
+            
+            const botBody = new CANNON.Body({
+                mass: botData.stats.weight,
+                material: groundMat,
+                position: new CANNON.Vec3(isPlayer ? -15 : 15, 5, 0),
+            });
+
+            const botMesh = new THREE.Group();
+            const botWeapons = [];
+
+            botData.parts.forEach(part => {
+                const partDef = ALL_PARTS[part.key];
+                if (!partDef) return;
+
+                const shape = createCannonShape(partDef.geometry);
+                const mesh = createPartMesh(partDef);
+                
+                const offset = new CANNON.Vec3().copy(part.pos).vsub(new CANNON.Vec3().copy(chassisPart.pos));
+                const quaternion = new CANNON.Quaternion().copy(part.quat);
+
+                botBody.addShape(shape, offset, quaternion);
+                mesh.position.copy(offset);
+                mesh.quaternion.copy(quaternion);
+                botMesh.add(mesh);
+
+                if (partDef.categoryId === 'weapons') {
+                    botWeapons.push({ key: part.key, mesh, body: botBody, offset, cooldown: 0 });
+                }
+            });
+
+            world.addBody(botBody);
+            scene.add(botMesh);
+            
+            return { body: botBody, mesh: botMesh, weapons: botWeapons, health: botData.stats.maxHealth, maxHealth: botData.stats.maxHealth, name: botData.name, isPlayer };
+        }
+
+        const player = createBotObject(playerBotData, true);
+
+        // --- Create Enemy Bot ---
+        const enemyChassisKey = 'chassis_heavy';
+        const enemyWeaponKey = 'weapon_hammer';
+        const enemyMobilityKey = 'mobility_treads';
+        const enemyChassisDef = ALL_PARTS[enemyChassisKey];
+
+        const enemyPartsForStats = [{key: enemyChassisKey}, {key: enemyWeaponKey}, {key: enemyMobilityKey}];
+        const enemyStats = calculateBotStats(enemyPartsForStats);
+
+        const enemyPartsList = [
+            { key: enemyChassisKey, instanceId: 'enemy_chassis', pos: new THREE.Vector3(0, enemyChassisDef.geometry.size[1]/2, 0), quat: new THREE.Quaternion(), attachmentIndex: -1 },
+            { key: enemyWeaponKey, instanceId: 'enemy_weapon', pos: new THREE.Vector3(0, enemyChassisDef.geometry.size[1]/2, 0).add(new THREE.Vector3().fromArray(enemyChassisDef.attachmentPoints[0].pos)), quat: new THREE.Quaternion(), attachmentIndex: 0 },
+        ];
+        
+        const enemyBotData = { name: "RIVAL-7", parts: enemyPartsList, stats: enemyStats };
+        const enemy = createBotObject(enemyBotData, false);
+        
+        let battleTime = 90;
+        let countdown = 3;
+        let winner = null;
+
+        setBattleState({ player, enemy, timer: battleTime, message: `GET READY`, winner: null });
+
+        const countdownInterval = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+                setBattleState(s => (s ? { ...s, message: "FIGHT!" } : null));
+                setTimeout(() => setBattleState(s => (s ? { ...s, message: null } : null)), 1000);
+                clearInterval(countdownInterval);
+            } else {
+                setBattleState(s => (s ? { ...s, message: `${countdown}` } : null));
+            }
+        }, 1000);
+        
+        let animationFrameId;
+        const clock = new THREE.Clock();
+        const animate = () => {
+            animationFrameId = requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            world.step(1/60, delta);
+            // if(debuggerInstance) debuggerInstance.update();
+
+            if(countdown <= 0 && !winner) {
+                const speed = (playerBotData.stats.speed || 10) * 8;
+                const turnSpeed = speed * 0.8;
+                const moveDirection = new THREE.Vector3(0,0, (keys.current['KeyW'] ? -1 : 0) + (keys.current['KeyS'] ? 1 : 0));
+                const turnDirection = (keys.current['KeyA'] ? 1 : 0) + (keys.current['KeyD'] ? -1 : 0);
+                
+                if(moveDirection.lengthSq() > 0) {
+                    const force = moveDirection.applyQuaternion(player.body.quaternion).multiplyScalar(speed);
+                    player.body.applyForce(new CANNON.Vec3(force.x, 0, force.z), player.body.position);
+                }
+                player.body.torque.y = turnDirection * turnSpeed;
+
+                 if (keys.current['Space']) {
+                    player.weapons.forEach(weapon => {
+                        if (weapon.cooldown <= 0 && weapon.key === 'weapon_flipper') {
+                            const flipperWorldPos = new CANNON.Vec3();
+                            player.body.pointToWorldFrame(weapon.offset, flipperWorldPos);
+                            const upwardForce = new CANNON.Vec3(0, 1, 0).scale(playerBotData.stats.weight * 300);
+                            player.body.applyImpulse(upwardForce, flipperWorldPos);
+                            weapon.cooldown = 2;
+                        }
+                    });
+                }
+                 player.weapons.forEach(w => w.cooldown = Math.max(0, w.cooldown - delta));
+                
+                const toPlayer = new CANNON.Vec3();
+                player.body.position.vsub(enemy.body.position, toPlayer);
+                const distance = toPlayer.length();
+                toPlayer.normalize();
+
+                if (distance > 5) {
+                    const aiForce = toPlayer.scale((enemyBotData.stats.speed || 10) * 6);
+                    enemy.body.applyForce(new CANNON.Vec3(aiForce.x, 0, aiForce.z), enemy.body.position);
+                }
+                 const angle = Math.atan2(player.body.position.x - enemy.body.position.x, player.body.position.z - enemy.body.position.z);
+                 const targetQuaternion = new CANNON.Quaternion().setFromAxisAngle(new CANNON.Vec3(0,1,0), angle);
+                 enemy.body.quaternion.slerp(targetQuaternion, 0.1, enemy.body.quaternion);
+            }
+
+            [player, enemy].forEach(bot => {
+                if (bot.body && bot.mesh) {
+                    bot.mesh.position.copy(bot.body.position);
+                    bot.mesh.quaternion.copy(bot.body.quaternion);
+                }
+            });
+
+            const cameraOffset = new THREE.Vector3(0, 10, 18);
+            const cameraLookAt = player.mesh.position;
+            const cameraPosition = cameraOffset.clone().add(player.mesh.position);
+            camera.position.lerp(cameraPosition, 0.1);
+            camera.lookAt(cameraLookAt);
+            
+            if (countdown <= 0 && !winner) {
+                battleTime -= delta;
+                
+                const checkWinner = () => {
+                    if (battleTime <= 0) return player.health > enemy.health ? player.name : enemy.name;
+                    if (player.health <= 0) return enemy.name;
+                    if (enemy.health <= 0) return player.name;
+                    if (player.body.position.y < -10) return enemy.name;
+                    if (enemy.body.position.y < -10) return player.name;
+                    return null;
+                };
+
+                winner = checkWinner();
+                
+                if (winner) {
+                     setBattleState(s => (s ? { ...s, winner, message: `${winner} WINS!` } : null));
+                } else {
+                     setBattleState(s => (s ? {...s, timer: battleTime} : null));
+                }
+            }
+            
+            renderer.render(scene, camera);
+        };
+        animate();
+        
+        const onCollision = (e) => {
+            if (countdown > 0 || winner) return;
+
+            const impactStrength = e.contact.getImpactVelocityAlongNormal();
+            if (impactStrength > 2) {
+                const damage = Math.min(impactStrength * 1.5, 25);
+                const bodyA = e.bodyA;
+                const bodyB = e.bodyB;
+
+                setBattleState(s => {
+                     if (!s) return null;
+                    let newPlayerHealth = s.player.health;
+                    let newEnemyHealth = s.enemy.health;
+
+                    if (bodyA === player.body || bodyB === player.body) newPlayerHealth -= damage;
+                    if (bodyA === enemy.body || bodyB === enemy.body) newEnemyHealth -= damage;
+                   
+                    return {...s, player: {...s.player, health: newPlayerHealth }, enemy: {...s.enemy, health: newEnemyHealth } };
+                });
+            }
+        };
+
+        world.addEventListener('beginContact', onCollision);
+
+        return () => {
+            cancelAnimationFrame(animationFrameId);
+            clearInterval(countdownInterval);
+            if(renderer.domElement && currentMount && renderer.domElement.parentNode === currentMount) {
+                currentMount.removeChild(renderer.domElement);
+            }
+            world.removeEventListener('beginContact', onCollision);
+        };
+    }, [playerBotData]);
+
+    return (
+        <div className="w-full h-full relative">
+            <div ref={mountRef} className="w-full h-full"></div>
+            {battleState && <BattleHUD battleState={battleState} onExit={() => setView('bot_builder')} />}
+        </div>
+    );
+};
+
+
+// --- MAIN APP COMPONENT ---
+export default function App() {
+    const { gameState, firebase, setView, createNewBot, loadBot, updateCurrentBot, saveCurrentBot, deleteBot, showModal, hideModal } = useGame();
+
+    const handleSave = () => {
+        if (!gameState.currentBot || gameState.currentBot.parts.length === 0) {
+            showModal("Cannot Save", <p>Your bot is empty. Add some parts first!</p>);
+            setTimeout(hideModal, 2000);
+            return;
+        }
+        showModal("Save Bot", <SaveBotModal bot={gameState.currentBot} onSave={saveCurrentBot} onCancel={hideModal} />);
+    };
+
+    const handleTest = () => {
+        const hasChassis = gameState.currentBot?.parts.some(p => ALL_PARTS[p.key]?.categoryId === 'chassis');
+        if (!hasChassis) {
+            showModal("Cannot Test", <p>Your bot must have a chassis before entering the arena.</p>);
+            setTimeout(hideModal, 3000);
+            return;
+        }
+        setView('arena');
+    };
+
+    const renderCurrentView = () => {
+        if (gameState.isLoading) {
+            return <div className="absolute inset-0 flex items-center justify-center text-white"><Loader2 className="animate-spin mr-4"/> Loading...</div>;
+        }
+
+        switch(gameState.currentView) {
+            case 'bot_builder':
+                return <BotBuilderView 
+                            bot={gameState.currentBot} 
+                            updateCurrentBot={updateCurrentBot}
+                            onSave={handleSave}
+                            onTest={handleTest}
+                            onExit={() => setView('garage')}
+                        />;
+            case 'arena':
+                return <ArenaView playerBotData={gameState.currentBot} setView={setView} showModal={showModal}/>;
+            case 'garage':
+                return <GarageView bots={gameState.savedBots} onLoad={loadBot} onCreate={createNewBot} onDelete={deleteBot} onBack={()=>setView('main_menu')} />;
+            case 'main_menu':
+            default:
+                return <MainMenu onStartBuilder={createNewBot} onOpenGarage={() => setView('garage')} />;
+        }
+    }
+    
+    return (
+        <>
+            <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto:wght@300;400;700&display=swap'); body { font-family: 'Roboto', sans-serif; background: linear-gradient(135deg, #0a0a0a, #1a1a2e, #16213e); color: #e0e0e0; } .menu-button { padding: 12px 24px; border-radius: 8px; color: white; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); border: 2px solid transparent; cursor: pointer; } .menu-button:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); } .builder-button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 6px; color: white; font-weight: bold; transition: all 0.2s; cursor: pointer; }`}</style>
+            <main className="w-screen h-screen flex items-center justify-center p-0 md:p-4 bg-transparent">
+                <div className="w-full h-full max-w-screen-2xl relative">
+                    {renderCurrentView()}
+                    <Modal modal={gameState.modal} onConfirm={() => { /* Handle generic confirm */ }} onCancel={hideModal} />
+                </div>
+            </main>
+        </>
+    );
+}

@@ -9,6 +9,7 @@
     <!-- Load Cannon.js library globally -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
     <style>
+        /* Base styles */
         body {
             font-family: 'Exo 2', sans-serif;
             background-color: #111827;
@@ -65,6 +66,48 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #9CA3AF;
         }
+
+        /* Responsive Inspector Panel */
+        @media (max-width: 767px) {
+            #inspector-panel {
+                position: fixed; /* Use fixed to overlay */
+                top: 0;
+                right: -100%; /* Initially off-screen */
+                width: 85%;
+                max-width: 320px; /* Max sensible width on small screens */
+                height: 100vh; /* Full height for slide-in */
+                border-radius: 0; /* Optional: remove border-radius for full height panel */
+                border-left: 1px solid rgba(55, 65, 81, 0.5); /* Add border on the visible edge */
+                border-right: none; /* Remove original border if it was on the right */
+                transition: right 0.3s ease-in-out; /* Animation for sliding */
+                z-index: 50; /* Ensure it's above other elements like canvas */
+            }
+            #inspector-panel.open {
+                right: 0; /* Slide in to view */
+            }
+
+            /* Left Panel adjustments for mobile */
+            #left-panel {
+                width: 12rem; /* Reduced width from w-72 (18rem) */
+            }
+            #left-panel > div:nth-child(2) > div.grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)); /* Change to 2 columns */
+            }
+        }
+
+        /* Responsive Bottom Panel (Mode Controls) */
+        @media (max-width: 480px) {
+            #bottom-panel {
+                flex-direction: column; /* Stack buttons vertically */
+                gap: 0.5rem; /* Tailwind gap-2 */
+                padding: 0.5rem; /* Tailwind p-2 */
+            }
+
+            #bottom-panel .control-button {
+                width: 100%; /* Make buttons take full width of the panel */
+                justify-content: center; /* Ensure text/icon content within button is centered */
+            }
+        }
     </style>
 </head>
 <body class="antialiased">
@@ -94,6 +137,13 @@
             </div>
         </div>
 
+        <!-- Load Default Bot Button -->
+        <div class="p-4 border-b border-gray-700">
+            <button id="show-load-bot-modal-btn" class="w-full control-button p-2 bg-indigo-600 hover:bg-indigo-700 rounded-md text-white font-semibold">
+                Load Default Bot
+            </button>
+        </div>
+
         <!-- Inventory -->
         <div class="p-4 flex-grow overflow-y-auto custom-scrollbar">
             <h2 class="text-lg font-semibold mb-3">Inventory</h2>
@@ -105,8 +155,11 @@
     
     <!-- Right Side Panel: Inspector -->
     <div id="inspector-panel" class="ui-panel top-4 right-4 w-80 h-[calc(100vh-2rem)] flex flex-col">
-        <div class="p-4 border-b border-gray-700">
+        <div class="p-4 border-b border-gray-700 relative"> <!-- Added relative for button positioning -->
             <h2 class="text-lg font-semibold">Inspector</h2>
+            <button id="inspector-close-btn" class="absolute top-3 right-3 text-gray-400 hover:text-white md:hidden">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
         </div>
         <div id="inspector-content" class="p-4 flex-grow overflow-y-auto custom-scrollbar">
             <p class="text-gray-400 text-center italic mt-4">Select a part to inspect its properties.</p>
@@ -145,6 +198,21 @@
         </div>
     </div>
 
+    <!-- Load Bot Modal -->
+    <div id="load-bot-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-white">Load a Default BattleBot</h3>
+                <button id="modal-close-btn" class="text-gray-400 hover:text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div id="default-bots-list" class="space-y-3">
+                <!-- Bot buttons will be injected here by JS -->
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -162,9 +230,9 @@
                 this.initEngine();
                 this.initPhysics();
                 this.initScene();
-                this.initUI();
+                this.initUI(); // Default bot designs will be initialized here
                 this.initControls();
-                this.initEventListeners();
+                this.initEventListeners(); // Modal listeners will be set up here
                 this.animate();
             }
 
@@ -214,7 +282,7 @@
                 this.physicsMaterials = {
                     ground: new CANNON.Material('ground'),
                     metal: new CANNON.Material('metal'),
-                    wood: new CANNON.Material('wood'), // Represents a generic wood, can be a basis
+                    wood: new CANNON.Material('wood'),
                     rubber: new CANNON.Material('rubber'),
                     concrete: new CANNON.Material('concrete'),
                     hard_wood: new CANNON.Material('hard_wood'),
@@ -224,40 +292,25 @@
                     rope_material: new CANNON.Material('rope_material')
                 };
                 
-                // Existing contact materials
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.metal, { friction: 0.3, restitution: 0.1 }));
-                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.wood, { friction: 0.5, restitution: 0.4 })); // General wood
+                this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.wood, { friction: 0.5, restitution: 0.4 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.rubber, { friction: 0.8, restitution: 0.5 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.metal, { friction: 0.2, restitution: 0.2 }));
-
-                // New contact materials
-                // Concrete interactions
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.concrete, { friction: 0.6, restitution: 0.2 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.concrete, { friction: 0.7, restitution: 0.1 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.concrete, this.physicsMaterials.concrete, { friction: 0.8, restitution: 0.05 }));
-
-
-                // Hard Wood interactions
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.hard_wood, { friction: 0.55, restitution: 0.3 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.hard_wood, { friction: 0.45, restitution: 0.25 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.hard_wood, this.physicsMaterials.hard_wood, { friction: 0.5, restitution: 0.3 }));
-
-                // Soft Wood interactions
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.soft_wood, { friction: 0.6, restitution: 0.5 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.soft_wood, { friction: 0.5, restitution: 0.4 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.soft_wood, this.physicsMaterials.soft_wood, { friction: 0.55, restitution: 0.6 }));
-
-                // Hard Plastic interactions
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.hard_plastic, { friction: 0.4, restitution: 0.2 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.hard_plastic, { friction: 0.35, restitution: 0.15 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.hard_plastic, this.physicsMaterials.hard_plastic, { friction: 0.3, restitution: 0.2 }));
-
-                // Soft Plastic interactions (can be similar to rubber or more bouncy)
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.soft_plastic, { friction: 0.7, restitution: 0.6 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.soft_plastic, { friction: 0.6, restitution: 0.5 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.soft_plastic, this.physicsMaterials.soft_plastic, { friction: 0.65, restitution: 0.7 }));
-
-                // Rope Material (placeholder values, usually very low restitution, high friction if tangled)
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.ground, this.physicsMaterials.rope_material, { friction: 0.8, restitution: 0.1 }));
                 this.world.addContactMaterial(new CANNON.ContactMaterial(this.physicsMaterials.metal, this.physicsMaterials.rope_material, { friction: 0.7, restitution: 0.1 }));
             }
@@ -266,9 +319,7 @@
                 this.scene.background = new THREE.Color(0x111827);
                 this.scene.fog = new THREE.FogExp2(0x111827, 0.015);
                 
-                // --- Lighting ---
                 this.scene.add(new THREE.AmbientLight(0x404040, 0.5));
-                
                 const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
                 keyLight.position.set(20, 40, 30);
                 keyLight.castShadow = true;
@@ -276,60 +327,43 @@
                 keyLight.shadow.mapSize.height = 4096;
                 keyLight.shadow.camera.near = 0.5;
                 keyLight.shadow.camera.far = 100;
-                keyLight.shadow.camera.left = -50;
-                keyLight.shadow.camera.right = 50;
-                keyLight.shadow.camera.top = 50;
-                keyLight.shadow.camera.bottom = -50;
+                keyLight.shadow.camera.left = -50; keyLight.shadow.camera.right = 50;
+                keyLight.shadow.camera.top = 50; keyLight.shadow.camera.bottom = -50;
                 this.scene.add(keyLight);
-                
                 const fillLight = new THREE.DirectionalLight(0x8899ff, 0.5);
                 fillLight.position.set(-20, 10, -30);
                 this.scene.add(fillLight);
-
                 const rimLight = new THREE.SpotLight(0xff88cc, 3);
                 rimLight.position.set(0, 20, -50);
                 rimLight.angle = Math.PI / 8;
                 rimLight.penumbra = 0.3;
                 this.scene.add(rimLight);
 
-                // --- Environment ---
                 const groundGeo = new THREE.PlaneGeometry(200, 200);
                 const groundMat = new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.7, metalness: 0.1 });
                 const ground = new THREE.Mesh(groundGeo, groundMat);
                 ground.rotation.x = -Math.PI / 2;
                 ground.receiveShadow = true;
                 this.scene.add(ground);
-                
                 const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: this.physicsMaterials.ground });
                 groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
                 this.world.addBody(groundBody);
                 
-                // Environment grid
                 const grid = new THREE.GridHelper(200, 100, 0x4f46e5, 0x444444);
                 grid.material.opacity = 0.3;
                 grid.material.transparent = true;
                 this.scene.add(grid);
 
-                // Build grid
-                const buildGridSize = 50;
-                const buildGridDivisions = 50;
-                const buildGridColor = 0x00FFFF; // Using cyan for the build grid
-                const buildGrid = new THREE.GridHelper(buildGridSize, buildGridDivisions, buildGridColor, buildGridColor);
+                const buildGrid = new THREE.GridHelper(50, 50, 0x00FFFF, 0x00FFFF);
                 buildGrid.position.y = 0.1;
-                buildGrid.material.opacity = 0.5; // Semi-transparent
+                buildGrid.material.opacity = 0.5;
                 buildGrid.material.transparent = true;
                 this.scene.add(buildGrid);
 
-                // Build Node Highlight Pool
                 this.buildNodeHighlights = [];
                 this.maxBuildNodeHighlights = 50;
-                const highlightGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16); // Small disc shape
-                const highlightMat = new THREE.MeshBasicMaterial({
-                    color: 0x00ff00,
-                    transparent: true,
-                    opacity: 0.5,
-                    side: THREE.DoubleSide
-                });
+                const highlightGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16);
+                const highlightMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
                 for (let i = 0; i < this.maxBuildNodeHighlights; i++) {
                     const highlightMesh = new THREE.Mesh(highlightGeo, highlightMat);
                     highlightMesh.visible = false;
@@ -340,109 +374,15 @@
 
             initUI() {
                 this.partsData = {
-                    // --- Existing Chassis Parts ---
-                    'core_block': {
-                        name: 'Power Core', type: 'chassis', size: [1, 1, 1], mass: 10, color: 0x3B82F6,
-                        material: 'metal', // Maps to this.physicsMaterials.metal
-                        health: 500,
-                        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`,
-                        buildNodes: [
-                            {pos: [0, 0.5, 0], dir: [0,1,0], type: 'surface'}, {pos: [0, -0.5, 0], dir: [0,-1,0], type: 'surface'},
-                            {pos: [0.5, 0, 0], dir: [1,0,0], type: 'surface'}, {pos: [-0.5, 0, 0], dir: [-1,0,0], type: 'surface'},
-                            {pos: [0, 0, 0.5], dir: [0,0,1], type: 'surface'}, {pos: [0, 0, -0.5], dir: [0,0,-1], type: 'surface'}
-                        ]
-                    },
-                    'metal_beam': {
-                        name: 'Metal Beam', type: 'chassis', size: [4, 0.5, 0.5], mass: 8, color: 0x6B7280,
-                        material: 'metal', // Maps to this.physicsMaterials.metal
-                        health: 250,
-                        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`,
-                        buildNodes: [ // Ends and main surfaces
-                            {pos: [2, 0, 0], dir: [1,0,0], type: 'surface'}, {pos: [-2, 0, 0], dir: [-1,0,0], type: 'surface'},
-                            {pos: [0, 0.25, 0], dir: [0,1,0], type: 'surface'}, {pos: [0, -0.25, 0], dir: [0,-1,0], type: 'surface'},
-                            {pos: [0, 0, 0.25], dir: [0,0,1], type: 'surface'}, {pos: [0, 0, -0.25], dir: [0,0,-1], type: 'surface'}
-                        ]
-                    },
-
-                    // --- New Structural Parts ---
-                    'steel_chassis_block': {
-                        name: 'Steel Chassis Block', type: 'chassis', size: [1, 1, 1], mass: 15, color: 0x52525B, // Darker grey for steel
-                        material: 'metal', // Conceptual: 'steel', Maps to this.physicsMaterials.metal (or a new 'steel' if defined)
-                        health: 800,
-                        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`, // Using core_block icon
-                        buildNodes: [
-                            {pos: [0, 0.5, 0], dir: [0,1,0], type: 'surface'}, {pos: [0, -0.5, 0], dir: [0,-1,0], type: 'surface'},
-                            {pos: [0.5, 0, 0], dir: [1,0,0], type: 'surface'}, {pos: [-0.5, 0, 0], dir: [-1,0,0], type: 'surface'},
-                            {pos: [0, 0, 0.5], dir: [0,0,1], type: 'surface'}, {pos: [0, 0, -0.5], dir: [0,0,-1], type: 'surface'}
-                        ]
-                    },
-                    'aluminum_beam_long': {
-                        name: 'Aluminum Beam (Long)', type: 'structure', size: [6, 0.4, 0.4], mass: 5, color: 0xA1A1AA, // Lighter grey for aluminum
-                        material: 'metal', // Conceptual: 'aluminum', Maps to this.physicsMaterials.metal (or a new 'aluminum')
-                        health: 200,
-                        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`, // Using metal_beam icon
-                        buildNodes: [
-                            {pos: [3, 0, 0], dir: [1,0,0], type: 'surface_end'}, {pos: [-3, 0, 0], dir: [-1,0,0], type: 'surface_end'},
-                            {pos: [0, 0.2, 0], dir: [0,1,0], type: 'surface_long'}, {pos: [0, -0.2, 0], dir: [0,-1,0], type: 'surface_long'},
-                            {pos: [0, 0, 0.2], dir: [0,0,1], type: 'surface_side'}, {pos: [0, 0, -0.2], dir: [0,0,-1], type: 'surface_side'}
-                        ]
-                    },
-                    'oak_plank': {
-                        name: 'Oak Wood Plank', type: 'structure', size: [3, 1, 0.2], mass: 4, color: 0x8A5A2B, // Brown for oak
-                        material: 'hard_wood', // Conceptual: 'oak_wood', Maps to this.physicsMaterials.hard_wood
-                        health: 150,
-                        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1" ry="1"/></svg>`, // Simple rectangle
-                        buildNodes: [
-                            {pos: [0, 0.5, 0], dir: [0,1,0], type: 'surface_top'}, {pos: [0, -0.5, 0], dir: [0,-1,0], type: 'surface_bottom'},
-                            {pos: [1.5, 0, 0], dir: [1,0,0], type: 'surface_end'}, {pos: [-1.5, 0, 0], dir: [-1,0,0], type: 'surface_end'},
-                            {pos: [0, 0, 0.1], dir: [0,0,1], type: 'surface_edge'}, {pos: [0, 0, -0.1], dir: [0,0,-1], type: 'surface_edge'}
-                        ]
-                    },
-                    'concrete_block': {
-                        name: 'Concrete Block', type: 'structure', size: [2, 1, 1], mass: 30, color: 0x9CA3AF, // Grey for concrete
-                        material: 'concrete', // Conceptual: 'concrete_composite', Maps to this.physicsMaterials.concrete
-                        health: 600,
-                        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`, // Simple cube
-                        buildNodes: [
-                            {pos: [0, 0.5, 0], dir: [0,1,0], type: 'surface'}, {pos: [0, -0.5, 0], dir: [0,-1,0], type: 'surface'},
-                            {pos: [1, 0, 0], dir: [1,0,0], type: 'surface'}, {pos: [-1, 0, 0], dir: [-1,0,0], type: 'surface'},
-                            {pos: [0, 0, 0.5], dir: [0,0,1], type: 'surface'}, {pos: [0, 0, -0.5], dir: [0,0,-1], type: 'surface'}
-                        ]
-                    },
-
-                    // --- New Functional Parts ---
-                    'motor_small': {
-                        name: 'Small Electric Motor', type: 'motor', size: [1, 0.8, 0.8], mass: 3, color: 0x71717A, // Medium grey
-                        material: 'metal', // Conceptual: 'steel'
-                        health: 100,
-                        icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 4v2M12 18v2M4 12h2M18 12h2M6.34 6.34l1.42 1.42M16.24 16.24l1.42 1.42M6.34 17.66l1.42-1.42M16.24 7.76l1.42-1.42"/></svg>`, // Gear icon
-                        buildNodes: [
-                            {pos: [0.5, 0, 0], dir: [1,0,0], type: 'axle_mount'}, // Axle output on X+ face
-                            {pos: [0, 0, -0.4], dir: [0,0,-1], type: 'surface_mount_back'} // Mounting surface on Z- face
-                        ],
-                        specificProperties: {maxTorque: 5, maxRPM: 300, powerConsumption: 20}
-                    },
-                    'servo_standard': {
-                        name: 'Standard Servo', type: 'servo', size: [0.8, 0.4, 0.6], mass: 0.5, color: 0x2563EB, // Blue for servo
-                        material: 'hard_plastic', // Conceptual: 'abs_plastic'
-                        health: 50,
-                        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.5 12A9.5 9.5 0 0 1 6.07 19.93L2 22l2.07-4.07A9.5 9.5 0 0 1 21.5 12z"/></svg>`, // Curved arrow
-                        buildNodes: [
-                            {pos: [0, 0.2, 0], dir: [0,1,0], type: 'horn_mount'}, // Horn on Y+ face
-                            {pos: [0, -0.2, 0], dir: [0,-1,0], type: 'surface_mount_bottom'} // Mounting surface on Y- face
-                        ],
-                        specificProperties: {rotationRange: 180, speed: 120, torque: 2}
-                    },
-                    'wheel_small_rubber': {
-                        name: 'Small Rubber Wheel', type: 'wheel', size: [0.8, 0.8, 0.3], mass: 1, color: 0x3F3F46, // Dark grey for rubber
-                        material: 'rubber', // Maps to this.physicsMaterials.rubber
-                        health: 80,
-                        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>`, // Circle icon
-                        buildNodes: [
-                            {pos: [0,0,0], dir: [0,0,1], type: 'axle_hole'} // Axle hole through the center (along Z)
-                        ]
-                    }
-                    // ... other parts can be added here
+                    'core_block': { name: 'Power Core', type: 'chassis', size: [1, 1, 1], mass: 10, color: 0x3B82F6, material: 'metal', health: 500, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`, buildNodes: [{pos: [0,0.5,0], dir: [0,1,0], type: 'surface'}, {pos: [0,-0.5,0], dir: [0,-1,0], type: 'surface'}, {pos: [0.5,0,0], dir: [1,0,0], type: 'surface'}, {pos: [-0.5,0,0], dir: [-1,0,0], type: 'surface'}, {pos: [0,0,0.5], dir: [0,0,1], type: 'surface'}, {pos: [0,0,-0.5], dir: [0,0,-1], type: 'surface'}]},
+                    'metal_beam': { name: 'Metal Beam', type: 'chassis', size: [4, 0.5, 0.5], mass: 8, color: 0x6B7280, material: 'metal', health: 250, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`, buildNodes: [{pos: [2,0,0], dir: [1,0,0], type: 'surface'}, {pos: [-2,0,0], dir: [-1,0,0], type: 'surface'}, {pos: [0,0.25,0], dir: [0,1,0], type: 'surface'}, {pos: [0,-0.25,0], dir: [0,-1,0], type: 'surface'}, {pos: [0,0,0.25], dir: [0,0,1], type: 'surface'}, {pos: [0,0,-0.25], dir: [0,0,-1], type: 'surface'}]},
+                    'steel_chassis_block': { name: 'Steel Chassis Block', type: 'chassis', size: [1,1,1], mass: 15, color: 0x52525B, material: 'metal', health: 800, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6"/><path d="M12 9v6"/></svg>`, buildNodes: [{pos:[0,0.5,0], dir:[0,1,0], type:'surface'}, {pos:[0,-0.5,0], dir:[0,-1,0], type:'surface'}, {pos:[0.5,0,0], dir:[1,0,0], type:'surface'}, {pos:[-0.5,0,0], dir:[-1,0,0], type:'surface'}, {pos:[0,0,0.5], dir:[0,0,1], type:'surface'}, {pos:[0,0,-0.5], dir:[0,0,-1], type:'surface'}]},
+                    'aluminum_beam_long': { name: 'Aluminum Beam (Long)', type: 'structure', size: [6,0.4,0.4], mass: 5, color: 0xA1A1AA, material: 'metal', health: 200, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v2H3zM3 20h18v2H3zM8 3v18M16 3v18"/></svg>`, buildNodes: [{pos:[3,0,0], dir:[1,0,0], type:'surface_end'}, {pos:[-3,0,0], dir:[-1,0,0], type:'surface_end'}, {pos:[0,0.2,0], dir:[0,1,0], type:'surface_long'}, {pos:[0,-0.2,0], dir:[0,-1,0], type:'surface_long'}, {pos:[0,0,0.2], dir:[0,0,1], type:'surface_side'}, {pos:[0,0,-0.2], dir:[0,0,-1], type:'surface_side'}]},
+                    'oak_plank': { name: 'Oak Wood Plank', type: 'structure', size: [3,1,0.2], mass: 4, color: 0x8A5A2B, material: 'hard_wood', health: 150, icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="1" ry="1"/></svg>`, buildNodes: [{pos:[0,0.5,0], dir:[0,1,0], type:'surface_top'}, {pos:[0,-0.5,0], dir:[0,-1,0], type:'surface_bottom'}, {pos:[1.5,0,0], dir:[1,0,0], type:'surface_end'}, {pos:[-1.5,0,0], dir:[-1,0,0], type:'surface_end'}, {pos:[0,0,0.1], dir:[0,0,1], type:'surface_edge'}, {pos:[0,0,-0.1], dir:[0,0,-1], type:'surface_edge'}]},
+                    'concrete_block': { name: 'Concrete Block', type: 'structure', size: [2,1,1], mass: 30, color: 0x9CA3AF, material: 'concrete', health: 600, icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`, buildNodes: [{pos:[0,0.5,0], dir:[0,1,0], type:'surface'}, {pos:[0,-0.5,0], dir:[0,-1,0], type:'surface'}, {pos:[1,0,0], dir:[1,0,0], type:'surface'}, {pos:[-1,0,0], dir:[-1,0,0], type:'surface'}, {pos:[0,0,0.5], dir:[0,0,1], type:'surface'}, {pos:[0,0,-0.5], dir:[0,0,-1], type:'surface'}]},
+                    'motor_small': { name: 'Small Electric Motor', type: 'motor', size: [1,0.8,0.8], mass: 3, color: 0x71717A, material: 'metal', health: 100, icon: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 4v2M12 18v2M4 12h2M18 12h2M6.34 6.34l1.42 1.42M16.24 16.24l1.42 1.42M6.34 17.66l1.42-1.42M16.24 7.76l1.42-1.42"/></svg>`, buildNodes: [{pos:[0.5,0,0], dir:[1,0,0], type:'axle_mount'}, {pos:[0,0,-0.4], dir:[0,0,-1], type:'surface_mount_back'}], specificProperties: {maxTorque: 5, maxRPM: 300, powerConsumption: 20}},
+                    'servo_standard': { name: 'Standard Servo', type: 'servo', size: [0.8,0.4,0.6], mass: 0.5, color: 0x2563EB, material: 'hard_plastic', health: 50, icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.5 12A9.5 9.5 0 0 1 6.07 19.93L2 22l2.07-4.07A9.5 9.5 0 0 1 21.5 12z"/></svg>`, buildNodes: [{pos:[0,0.2,0], dir:[0,1,0], type:'horn_mount'}, {pos:[0,-0.2,0], dir:[0,-1,0], type:'surface_mount_bottom'}], specificProperties: {rotationRange: 180, speed: 120, torque: 2}},
+                    'wheel_small_rubber': { name: 'Small Rubber Wheel', type: 'wheel', size: [0.8,0.8,0.3], mass: 1, color: 0x3F3F46, material: 'rubber', health: 80, icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>`, buildNodes: [{pos:[0,0,0], dir:[0,0,1], type:'axle_hole'}]}
                 };
                 
                 const inventoryEl = document.getElementById('inventory-parts');
@@ -461,29 +401,98 @@
 
                 this.inspectorContent = document.getElementById('inspector-content');
                 
-                // Buttons
                 this.buildModeBtn = document.getElementById('build-mode-btn');
                 this.testModeBtn = document.getElementById('test-mode-btn');
                 this.toolSelectBtn = document.getElementById('tool-select');
                 this.toolRotateBtn = document.getElementById('tool-rotate');
                 this.toolDeleteBtn = document.getElementById('tool-delete');
 
-                // Thumbstick UI elements
                 this.thumbstickArea = document.getElementById('thumbstick-area');
                 this.thumbstickHandle = document.getElementById('thumbstick-handle');
                 this.thumbstickInput = { x: 0, y: 0 };
                 this.thumbstickActive = false;
-                this.thumbstickRadius = 0; // Will be calculated on first touch/mousedown
-                if (this.thumbstickArea) { // Calculate initial radius if area is already in DOM
-                     // Ensure this runs after DOM is fully available or recalculate on first interaction
-                    setTimeout(() => { // Delay to ensure offsetWidth is available
-                         if (this.thumbstickArea && this.thumbstickArea.offsetWidth > 0) { // Check if thumbstickArea exists
+                this.thumbstickRadius = 0;
+                if (this.thumbstickArea) {
+                    setTimeout(() => {
+                         if (this.thumbstickArea && this.thumbstickArea.offsetWidth > 0) {
                             this.thumbstickRadius = this.thumbstickArea.offsetWidth / 2;
                          }
                     }, 0);
                 }
                 this.actionButton1 = document.getElementById('action-button-1');
                 this.actionButton1Active = false;
+
+                // --- Default Bot Designs Definition ---
+                this.defaultBotDesigns = {
+                    'Scuttler': {
+                        parts: [
+                            { id: 'scuttler_core', partId: 'core_block', position: [0, 0.5, 0], orientation: [0,0,0,1] },
+                            // Motor L: size [1, 0.8, 0.8]. Core size [1,1,1]. Place motor left of core.
+                            // Core center X=0. Motor center X = -(core_half_width + motor_half_width_along_X_if_not_rotated)
+                            // If motor's length (1) is along X, its half-width is 0.5. Core half-width is 0.5. X = -(0.5+0.5) = -1.
+                            // If motor's depth (0.8) is along X (after 90deg Y rot), its half-width is 0.4. X = -(0.5+0.4) = -0.9
+                            // Let's assume motor axle (local X) points outwards from connection. For left motor, this means rotating it +90deg around Y.
+                            { id: 'scuttler_motor_l', partId: 'motor_small', position: [-0.9, 0.5, 0], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI/2, 0)).toArray() },
+                            { id: 'scuttler_motor_r', partId: 'motor_small', position: [0.9, 0.5, 0], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.PI/2, 0)).toArray() },
+                            // Wheel: size [0.8,0.8,0.3]. Wheel axle hole is local Z. Motor axle is local X.
+                            // Wheel needs to be rotated to align its Z with motor's new X (which is world -Z for left, world +Z for right)
+                            // And also rotated so its flat side faces motor.
+                            // Left wheel: motor at X -0.9. Motor's local X (axle) points to world -Z. Wheel pos X = -0.9. Wheel pos Z = -(motor_depth/2 + wheel_thickness/2) = -(0.8/2 + 0.3/2) = -(0.4+0.15) = -0.55
+                            { id: 'scuttler_wheel_l', partId: 'wheel_small_rubber', position: [-0.9, 0.5, -0.55], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI/2, Math.PI/2)).toArray() }, // Rotated to align Z with world -X, then roll
+                            { id: 'scuttler_wheel_r', partId: 'wheel_small_rubber', position: [0.9, 0.5, 0.55], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.PI/2, -Math.PI/2)).toArray() }, // Rotated to align Z with world +X, then roll
+                            { id: 'scuttler_beam', partId: 'aluminum_beam_long', position: [0, 0.5, (0.5 + 6/2)], orientation: [0,0,0,1] } // Front beam
+                        ],
+                        constraints: [
+                            { bodyAId: 'scuttler_core', bodyBId: 'scuttler_motor_l' },
+                            { bodyAId: 'scuttler_core', bodyBId: 'scuttler_motor_r' },
+                            { bodyAId: 'scuttler_motor_l', bodyBId: 'scuttler_wheel_l' },
+                            { bodyAId: 'scuttler_motor_r', bodyBId: 'scuttler_wheel_r' },
+                            { bodyAId: 'scuttler_core', bodyBId: 'scuttler_beam' }
+                        ]
+                    },
+                    'Bruiser': {
+                        parts: [
+                            { id: 'b_base1', partId: 'steel_chassis_block', position: [-0.5, 0.5, 0], orientation: [0,0,0,1] },
+                            { id: 'b_base2', partId: 'steel_chassis_block', position: [0.5, 0.5, 0], orientation: [0,0,0,1] },
+                            { id: 'b_motor_l', partId: 'motor_small', position: [-1.0, 0.5, -0.5], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0)).toArray() }, // Axle points backward
+                            { id: 'b_motor_r', partId: 'motor_small', position: [1.0, 0.5, -0.5], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0)).toArray() }, // Axle points backward
+                            { id: 'b_wheel_l', partId: 'wheel_small_rubber', position: [-1.0, 0.5, -0.5 - (0.8/2 + 0.3/2)], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.PI, Math.PI/2)).toArray() },
+                            { id: 'b_wheel_r', partId: 'wheel_small_rubber', position: [1.0, 0.5, -0.5 - (0.8/2 + 0.3/2)], orientation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0,Math.PI, Math.PI/2)).toArray() },
+                        ],
+                        constraints: [
+                            { bodyAId: 'b_base1', bodyBId: 'b_base2' },
+                            { bodyAId: 'b_base1', bodyBId: 'b_motor_l' },
+                            { bodyAId: 'b_base2', bodyBId: 'b_motor_r' },
+                            { bodyAId: 'b_motor_l', bodyBId: 'b_wheel_l' },
+                            { bodyAId: 'b_motor_r', bodyBId: 'b_wheel_r' },
+                        ]
+                    }
+                };
+
+                this.loadBotModal = document.getElementById('load-bot-modal');
+                this.defaultBotsListEl = document.getElementById('default-bots-list');
+                this.showLoadBotModalBtn = document.getElementById('show-load-bot-modal-btn');
+                this.modalCloseBtn = document.getElementById('modal-close-btn');
+
+                if (this.defaultBotsListEl && this.defaultBotDesigns) {
+                    this.defaultBotsListEl.innerHTML = '';
+                    for (const botName in this.defaultBotDesigns) {
+                        const botButton = document.createElement('button');
+                        botButton.className = 'w-full control-button p-3 bg-gray-700 hover:bg-gray-600 rounded-md text-white';
+                        botButton.textContent = botName;
+                        botButton.onclick = () => {
+                            if (typeof this.loadBotDesign === 'function') {
+                                this.loadBotDesign(botName);
+                            } else {
+                                console.error('loadBotDesign function is not defined on this BattleBotsGame instance.');
+                            }
+                            if(this.loadBotModal) this.loadBotModal.classList.add('hidden');
+                        };
+                        this.defaultBotsListEl.appendChild(botButton);
+                    }
+                } else {
+                    if(!this.defaultBotsListEl) console.warn("Element with ID 'default-bots-list' not found for populating bot designs.");
+                }
             }
 
             initControls() {
@@ -502,95 +511,71 @@
                         this.updateBuildNodeHighlights();
                     } else { // Dragging ends
                         // Hide all highlights when dragging stops.
-                        // This is also done at the start of updateBuildNodeHighlights, but ensures cleanup if drag ends unexpectedly.
                         for (const highlightMesh of this.buildNodeHighlights) {
                             highlightMesh.visible = false;
                         }
 
                         // --- Snapping Logic ---
-                        // This section handles snapping the dragged part to the closest compatible build node on another part.
                         const draggedMesh = this.transformControls.object;
-                        this.updatePhysicsBody(draggedMesh); // Ensure physics body is up-to-date before snap calculations.
+                        this.updatePhysicsBody(draggedMesh);
 
-                        const draggedMeshWorldPosition = new THREE.Vector3(); // To store world position of the dragged mesh's origin.
+                        const draggedMeshWorldPosition = new THREE.Vector3();
                         draggedMesh.getWorldPosition(draggedMeshWorldPosition);
-                        const draggedMeshWorldQuaternion = new THREE.Quaternion(); // To store world orientation of the dragged mesh.
+                        const draggedMeshWorldQuaternion = new THREE.Quaternion();
                         draggedMesh.getWorldQuaternion(draggedMeshWorldQuaternion);
 
-                        const snapThreshold = 1.5; // Maximum distance between a dragged node and a target node to be considered for snapping.
-                        const orientationSnapThreshold = -0.9; // Dot product threshold for node normals to be considered opposing (close to -1).
-                        let bestSnap = null; // Stores the best snap candidate found.
-                        let minNodeDistance = Infinity; // Tracks the smallest distance for the best snap.
+                        const snapThreshold = 1.5;
+                        const orientationSnapThreshold = -0.9;
+                        let bestSnap = null;
+                        let minNodeDistance = Infinity;
 
-                        // The dragged mesh must have build nodes to participate in advanced snapping.
                         if (!draggedMesh.userData.buildNodes || draggedMesh.userData.buildNodes.length === 0) {
-                            this.updatePhysicsBody(draggedMesh); // Update physics body with its current transform.
+                            this.updatePhysicsBody(draggedMesh);
                             return;
                         }
 
-                        // Iterate through all other parts in the scene to find potential snap targets.
                         for (const targetMesh of this.robotParts) {
-                            // Cannot snap to itself or to parts without build nodes.
-                            if (targetMesh === draggedMesh || !targetMesh.userData.buildNodes || targetMesh.userData.buildNodes.length === 0) continue;
+                            if (targetMesh === draggedMesh || !targetMesh.userData.buildNodes || targetMesh.userData.buildNodes.length === 0 || (targetMesh.userData.isDestroyed && this.mode === 'test')) continue;
 
-                            const targetMeshWorldPosition = new THREE.Vector3(); // World position of the target mesh's origin.
+                            const targetMeshWorldPosition = new THREE.Vector3();
                             targetMesh.getWorldPosition(targetMeshWorldPosition);
-                            const targetMeshWorldQuaternion = new THREE.Quaternion(); // World orientation of the target mesh.
+                            const targetMeshWorldQuaternion = new THREE.Quaternion();
                             targetMesh.getWorldQuaternion(targetMeshWorldQuaternion);
 
-                            // Iterate through each build node on the target mesh.
                             for (const targetNode of targetMesh.userData.buildNodes) {
-                                // Convert target node's local position and direction to world space.
                                 const worldTargetNodePos = new THREE.Vector3().fromArray(targetNode.pos).applyQuaternion(targetMeshWorldQuaternion).add(targetMeshWorldPosition);
                                 const worldTargetNodeDir = new THREE.Vector3().fromArray(targetNode.dir).applyQuaternion(targetMeshWorldQuaternion).normalize();
 
-                                // Iterate through each build node on the dragged mesh.
                                 for (const draggedNode of draggedMesh.userData.buildNodes) {
-                                    // Calculate the current world position of the dragged node (before any hypothetical snapping).
                                     const currentWorldDraggedNodePos = new THREE.Vector3().fromArray(draggedNode.pos).applyQuaternion(draggedMeshWorldQuaternion).add(draggedMeshWorldPosition);
                                     const distanceToTargetNode = currentWorldDraggedNodePos.distanceTo(worldTargetNodePos);
 
-                                    // If this pair of nodes is too far apart, skip to the next one.
                                     if (distanceToTargetNode > snapThreshold) continue;
 
-                                    // --- Orientation Alignment Calculation ---
-                                    // Get the current world direction of the dragged node.
                                     const currentWorldDraggedNodeDir = new THREE.Vector3().fromArray(draggedNode.dir).applyQuaternion(draggedMeshWorldQuaternion).normalize();
-                                    // The desired world direction for the dragged node is opposite to the target node's direction.
                                     const desiredWorldDraggedNodeDir = worldTargetNodeDir.clone().negate();
 
-                                    // Calculate the rotation needed to align currentWorldDraggedNodeDir with desiredWorldDraggedNodeDir.
                                     const alignRotation = new THREE.Quaternion().setFromUnitVectors(currentWorldDraggedNodeDir, desiredWorldDraggedNodeDir);
-                                    // Apply this alignment rotation to the dragged mesh's current world quaternion to get a hypothetical new orientation.
                                     const hypotheticalQuaternion = alignRotation.clone().multiply(draggedMeshWorldQuaternion);
 
-                                    // --- Compatibility Check (Post-Hypothetical Alignment) ---
-                                    // Calculate what the dragged node's direction would be if the mesh adopted the hypotheticalQuaternion.
                                     const futureWorldDraggedNodeDir = new THREE.Vector3().fromArray(draggedNode.dir).applyQuaternion(hypotheticalQuaternion).normalize();
                                     const dotProduct = futureWorldDraggedNodeDir.dot(worldTargetNodeDir);
 
-                                    // Check if the normals are sufficiently opposing (dot product close to -1).
                                     if (dotProduct < orientationSnapThreshold) {
-                                        // --- Position Calculation (to make nodes meet precisely) ---
-                                        // Get the local position of the dragged node.
                                         const localDraggedNodePos = new THREE.Vector3().fromArray(draggedNode.pos);
-                                        // Transform this local position by the hypotheticalQuaternion to find its offset from the mesh's origin in the new orientation (world space).
                                         const rotatedDraggedNodeOffset = localDraggedNodePos.clone().applyQuaternion(hypotheticalQuaternion);
-                                        // To make the worldTargetNodePos and the (now rotated) worldDraggedNodePos coincide,
-                                        // the dragged mesh's origin must be at worldTargetNodePos - rotatedDraggedNodeOffset.
                                         const hypotheticalPosition = worldTargetNodePos.clone().sub(rotatedDraggedNodeOffset);
 
-                                        // If this snap is closer than previously found valid snaps, store it.
                                         if (distanceToTargetNode < minNodeDistance) {
                                             minNodeDistance = distanceToTargetNode;
                                             bestSnap = {
-                                                distance: distanceToTargetNode, // Store the initial distance for comparison.
-                                                calculatedPosition: hypotheticalPosition, // The calculated final position for the dragged mesh.
-                                                calculatedQuaternion: hypotheticalQuaternion, // The calculated final orientation for the dragged mesh.
+                                                distance: distanceToTargetNode,
+                                                calculatedPosition: hypotheticalPosition,
+                                                calculatedQuaternion: hypotheticalQuaternion,
                                                 draggedMesh: draggedMesh,
                                                 targetMesh: targetMesh,
-                                                draggedNodeData: draggedNode, // Specific node on the dragged part.
-                                                targetNodeData: targetNode    // Specific node on the target part.
+                                                draggedNodeData: draggedNode,
+                                                targetNodeData: targetNode
                                             };
                                         }
                                     }
@@ -598,14 +583,11 @@
                             }
                         }
 
-                        // --- Apply Best Snap and Create Constraint ---
                         if (bestSnap) {
-                            // Apply the calculated position and orientation to the dragged mesh.
                             bestSnap.draggedMesh.position.copy(bestSnap.calculatedPosition);
                             bestSnap.draggedMesh.quaternion.copy(bestSnap.calculatedQuaternion);
-                            this.updatePhysicsBody(bestSnap.draggedMesh); // Synchronize the physics body.
+                            this.updatePhysicsBody(bestSnap.draggedMesh);
 
-                            // Create a lock constraint between the two bodies if one doesn't already exist.
                             const draggedBody = bestSnap.draggedMesh.userData.body;
                             const targetBody = bestSnap.targetMesh.userData.body;
                             let alreadyConstrained = false;
@@ -621,7 +603,6 @@
                                 const constraint = new CANNON.LockConstraint(draggedBody, targetBody);
                                 this.world.addConstraint(constraint);
                                 this.constraints.push(constraint);
-                                // Store connection info on both meshes for potential future use (e.g., easy traversal, breaking connections).
                                 draggedMesh.userData.connections = draggedMesh.userData.connections || [];
                                 draggedMesh.userData.connections.push({ targetBodyId: targetBody.userData.id, constraint: constraint });
                                 bestSnap.targetMesh.userData.connections = bestSnap.targetMesh.userData.connections || [];
@@ -629,11 +610,9 @@
                                 console.log('Constraint added between:', draggedBody.userData.id, 'and', targetBody.userData.id);
                             }
                         } else {
-                            // If no suitable snap was found, just update the physics body to the final dragged position.
                             this.updatePhysicsBody(draggedMesh);
                         }
-                    } else if (!event.value) { // Dragging ended, but no object was being dragged (e.g. a click on empty space might trigger this).
-                        // Ensure all highlights are hidden.
+                    } else if (!event.value) {
                         for (const highlightMesh of this.buildNodeHighlights) {
                             highlightMesh.visible = false;
                         }
@@ -658,6 +637,25 @@
 
                 this.initThumbstickControls();
                 this.initActionButtons();
+
+                if (this.showLoadBotModalBtn && this.loadBotModal) {
+                    this.showLoadBotModalBtn.addEventListener('click', () => {
+                        if(this.loadBotModal) this.loadBotModal.classList.remove('hidden');
+                    });
+                }
+                if (this.modalCloseBtn && this.loadBotModal) {
+                    this.modalCloseBtn.addEventListener('click', () => {
+                        if(this.loadBotModal) this.loadBotModal.classList.add('hidden');
+                    });
+                }
+
+                const inspectorCloseBtn = document.getElementById('inspector-close-btn');
+                if (inspectorCloseBtn) {
+                    inspectorCloseBtn.addEventListener('click', () => {
+                        document.getElementById('inspector-panel').classList.remove('open');
+                        this.updateInspector(null);
+                    });
+                }
             }
 
             initActionButtons() {
@@ -666,7 +664,6 @@
                     this.actionButton1.addEventListener('touchstart', (e) => {e.preventDefault(); this.handleActionButton1Press();}, { passive: false });
                     this.actionButton1.addEventListener('mouseup', () => this.handleActionButton1Release());
                     this.actionButton1.addEventListener('touchend', (e) => {e.preventDefault(); this.handleActionButton1Release();});
-                    // Add mouseleave for button, in case mouse is released outside
                     this.actionButton1.addEventListener('mouseleave', () => { if(this.actionButton1Active) this.handleActionButton1Release(); });
                 }
             }
@@ -674,15 +671,13 @@
             handleActionButton1Press() {
                 if (this.mode !== 'test') return;
                 this.actionButton1Active = true;
-                 if(this.actionButton1) this.actionButton1.classList.add('bg-green-700/70'); // Visual feedback
-                // console.log("Action Button 1 pressed");
+                 if(this.actionButton1) this.actionButton1.classList.add('bg-green-700/70');
             }
 
             handleActionButton1Release() {
-                if (this.mode !== 'test') return; // Should not happen if button is hidden, but good check
+                if (this.mode !== 'test') return;
                 this.actionButton1Active = false;
-                if(this.actionButton1) this.actionButton1.classList.remove('bg-green-700/70'); // Visual feedback
-                // console.log("Action Button 1 released");
+                if(this.actionButton1) this.actionButton1.classList.remove('bg-green-700/70');
             }
 
             getAllConnectedParts(startBody) {
@@ -732,10 +727,9 @@
             }
 
             handleThumbstickStart(event) {
-                if (this.mode !== 'test') return; // Only active in test mode
+                if (this.mode !== 'test') return;
                 event.preventDefault();
                 this.thumbstickActive = true;
-                // Recalculate radius here to be sure, useful if window was resized while UI hidden
                 this.thumbstickRadius = this.thumbstickArea.offsetWidth / 2;
                 const clientX = event.clientX || (event.touches && event.touches[0].clientX);
                 const clientY = event.clientY || (event.touches && event.touches[0].clientY);
@@ -782,16 +776,13 @@
 
                 this.thumbstickHandle.style.transform = `translate(${dx}px, ${dy}px)`;
 
-                // Normalize input to range -1 to 1
-                // Ensure maxHandleRadius is not zero to prevent division by zero if UI isn't fully ready
                 if (maxHandleRadius > 0) {
                     this.thumbstickInput.x = dx / maxHandleRadius;
-                    this.thumbstickInput.y = -(dy / maxHandleRadius); // Inverted Y for typical game controls (up is positive)
+                    this.thumbstickInput.y = -(dy / maxHandleRadius);
                 } else {
                     this.thumbstickInput.x = 0;
                     this.thumbstickInput.y = 0;
                 }
-                // console.log('Thumbstick Input:', this.thumbstickInput); // For debugging
             }
 
 
@@ -799,34 +790,27 @@
 
             /**
              * Updates the visibility and transform of build node highlights.
-             * This method is called when a drag operation starts and as the dragged object moves.
-             * It identifies and highlights compatible build nodes on other parts that are close to any
-             * build node on the dragged part.
              */
             updateBuildNodeHighlights() {
-                // Hide all highlights before recalculating.
                 for (const highlight of this.buildNodeHighlights) {
                     highlight.visible = false;
                 }
 
-                // Only proceed if an object is being dragged with transform controls.
                 if (!this.transformControls.object || !this.transformControls.dragging) {
                     return;
                 }
 
                 const draggedMesh = this.transformControls.object;
-                // Dragged mesh must have build nodes to find compatible targets.
                 if (!draggedMesh.userData.buildNodes || draggedMesh.userData.buildNodes.length === 0) {
                     return;
                 }
 
-                let highlightCount = 0; // Tracks how many highlights are currently shown.
-                const proximityThreshold = 1.5; // Max distance between a dragged node and a target node to consider highlighting.
-                const orientationDotThreshold = -0.7; // Dot product threshold: values < -0.7 indicate sufficiently opposing normals.
+                let highlightCount = 0;
+                const proximityThreshold = 1.5;
+                const orientationDotThreshold = -0.7;
 
-                const defaultUp = new THREE.Vector3(0, 1, 0); // Default 'up' vector for cylinder highlight orientation.
+                const defaultUp = new THREE.Vector3(0, 1, 0);
 
-                // Pre-allocate THREE.js objects for use in loops to improve performance by avoiding repeated instantiation.
                 const draggedMeshWorldPosition = new THREE.Vector3();
                 draggedMesh.getWorldPosition(draggedMeshWorldPosition);
                 const draggedMeshWorldQuaternion = new THREE.Quaternion();
@@ -840,67 +824,131 @@
 
 
                 for (const draggedNode of draggedMesh.userData.buildNodes) {
-                    // Calculate the world position and direction of the current build node on the dragged mesh.
-                    // These are calculated once per draggedNode, outside the inner loops.
                     worldDraggedNodePos.fromArray(draggedNode.pos).applyQuaternion(draggedMeshWorldQuaternion).add(draggedMeshWorldPosition);
                     worldDraggedNodeDir.fromArray(draggedNode.dir).applyQuaternion(draggedMeshWorldQuaternion).normalize();
 
-                    // Iterate through all other parts in the scene to find potential snap targets.
                     for (const otherPartMesh of this.robotParts) {
-                        if (otherPartMesh === draggedMesh || !otherPartMesh.userData.buildNodes || otherPartMesh.userData.buildNodes.length === 0) {
-                            continue; // Skip self or parts without build nodes.
+                        if (otherPartMesh === draggedMesh || !otherPartMesh.userData.buildNodes || otherPartMesh.userData.buildNodes.length === 0 || otherPartMesh.userData.isDestroyed) {
+                            continue;
                         }
 
                         otherPartMesh.getWorldPosition(targetMeshWorldPosition);
-                        const otherPartMeshWorldQuaternion = otherPartMesh.quaternion; // Get live quaternion of the target part.
+                        const otherPartMeshWorldQuaternion = otherPartMesh.quaternion;
 
-                        // Iterate through each build node on the target mesh.
                         for (const targetNode of otherPartMesh.userData.buildNodes) {
-                            // Calculate world position and direction of the current target node.
                             worldTargetNodePos.fromArray(targetNode.pos).applyQuaternion(otherPartMeshWorldQuaternion).add(targetMeshWorldPosition);
                             worldTargetNodeDir.fromArray(targetNode.dir).applyQuaternion(otherPartMeshWorldQuaternion).normalize();
 
-                            // 1. Proximity Check: Are the dragged node and target node close enough?
                             const distance = worldDraggedNodePos.distanceTo(worldTargetNodePos);
                             if (distance > proximityThreshold) {
-                                continue; // Skip if too far.
+                                continue;
                             }
 
-                            // 2. Orientation Compatibility Check: Are the node normals generally opposing?
-                            // Dot product of two normalized vectors:
-                            //  1: same direction
-                            //  0: perpendicular
-                            // -1: opposite direction
                             const dotProduct = worldDraggedNodeDir.dot(worldTargetNodeDir);
-                            if (dotProduct > orientationDotThreshold) { // e.g., if dot is -0.5, it's > -0.7, so skip. If -0.9, it's < -0.7, so proceed.
-                                continue; // Skip if normals are not sufficiently opposing.
+                            if (dotProduct > orientationDotThreshold) {
+                                continue;
                             }
-                            // console.log(`Compatible node found: dist=${distance.toFixed(2)}, dot=${dotProduct.toFixed(2)} on target ${otherPartMesh.userData.partId} node ${targetNode.type}`);
 
-                            // If both checks pass, this targetNode is a candidate for highlighting.
-                            if (highlightCount >= this.maxBuildNodeHighlights) break; // Stop if highlight pool is exhausted.
+                            if (highlightCount >= this.maxBuildNodeHighlights) break;
 
                             const highlightMesh = this.buildNodeHighlights[highlightCount];
                             highlightMesh.position.copy(worldTargetNodePos);
-                            // Orient the highlight (cylinder/disc) to lie flat on the target node's surface.
-                            // The cylinder's default orientation has its length along the Y-axis.
-                            // We want to align this Y-axis with the target node's world normal.
                             highlightMesh.quaternion.setFromUnitVectors(defaultUp, worldTargetNodeDir);
                             highlightMesh.visible = true;
                             highlightCount++;
                         }
-                        if (highlightCount >= this.maxBuildNodeHighlights) break; // Break from otherPartMesh loop if pool exhausted.
+                        if (highlightCount >= this.maxBuildNodeHighlights) break;
                     }
-                    if (highlightCount >= this.maxBuildNodeHighlights) break; // Break from draggedNode loop if pool exhausted.
+                    if (highlightCount >= this.maxBuildNodeHighlights) break;
                 }
             }
 
+            clearCurrentRobot() {
+                if (this.transformControls.object) {
+                    this.transformControls.detach();
+                }
+                this.selectPart(null); // This also clears inspector and handles mobile panel state
 
-            addPart(partId) {
-                if (this.mode !== 'build') return;
+                for (let i = this.robotParts.length - 1; i >= 0; i--) {
+                    const mesh = this.robotParts[i];
+                    if (mesh.userData.connections && mesh.userData.connections.length > 0) {
+                        [...mesh.userData.connections].forEach(connection => {
+                            this.world.removeConstraint(connection.constraint);
+                            this.constraints = this.constraints.filter(c => c !== connection.constraint);
+
+                            const otherBody = this.world.bodies.find(b => b.userData && b.userData.id === connection.targetBodyId);
+                            if (otherBody && otherBody.userData.mesh && otherBody.userData.mesh.userData.connections) {
+                                otherBody.userData.mesh.userData.connections = otherBody.userData.mesh.userData.connections.filter(
+                                    conn => conn.constraint !== connection.constraint
+                                );
+                            }
+                        });
+                    }
+                    this.world.removeBody(mesh.userData.body);
+                    this.scene.remove(mesh);
+                }
+                this.robotParts = [];
+                this.constraints = [];
+            }
+
+            loadBotDesign(botName) {
+                const design = this.defaultBotDesigns[botName];
+                if (!design) {
+                    console.error(`Bot design "${botName}" not found.`);
+                    return;
+                }
+
+                this.clearCurrentRobot();
+                const designIdToMeshMap = new Map();
+
+                design.parts.forEach(partData => {
+                    const pos = partData.position ? new THREE.Vector3().fromArray(partData.position) : null;
+                    const orientQuat = partData.orientation ? new THREE.Quaternion().fromArray(partData.orientation) : null;
+
+                    const newMesh = this.addPart(partData.partId, pos, orientQuat, partData.id);
+                    if (newMesh) {
+                        designIdToMeshMap.set(partData.id, newMesh);
+                    }
+                });
+
+                if (design.constraints) {
+                    design.constraints.forEach(constraintDef => {
+                        const meshA = designIdToMeshMap.get(constraintDef.bodyAId);
+                        const meshB = designIdToMeshMap.get(constraintDef.bodyBId);
+
+                        if (meshA && meshB && meshA.userData.body && meshB.userData.body) {
+                            const bodyA = meshA.userData.body;
+                            const bodyB = meshB.userData.body;
+
+                            const constraint = new CANNON.LockConstraint(bodyA, bodyB);
+                            this.world.addConstraint(constraint);
+                            this.constraints.push(constraint);
+
+                            meshA.userData.connections = meshA.userData.connections || [];
+                            meshA.userData.connections.push({ targetBodyId: bodyB.userData.id, constraint: constraint });
+
+                            meshB.userData.connections = meshB.userData.connections || [];
+                            meshB.userData.connections.push({ targetBodyId: bodyA.userData.id, constraint: constraint });
+                        } else {
+                            console.warn("Could not create constraint for design, one or both bodies not found for design IDs:", constraintDef.bodyAId, constraintDef.bodyBId);
+                        }
+                    });
+                }
+                this.updateInspector(null);
+                console.log(`Loaded bot design: ${botName}`);
+            }
+
+            addPart(partId, desiredPosition = null, desiredOrientation = null, designInstanceId = null) {
+                if (this.mode !== 'build' && !designInstanceId) {
+                     if (this.mode !== 'build') console.warn("AddPart called by user outside build mode.");
+                     return null;
+                }
                 const data = this.partsData[partId];
+                if (!data) {
+                    console.error(`Part data not found for partId: ${partId}`);
+                    return null;
+                }
 
-                // --- Mesh ---
                 const geo = new THREE.BoxGeometry(...data.size);
                 const mat = new THREE.MeshStandardMaterial({
                     color: data.color,
@@ -910,41 +958,78 @@
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
-                mesh.position.set(0, 5, 0);
 
-                // --- Physics Body ---
+                if (desiredPosition) {
+                    mesh.position.copy(desiredPosition);
+                } else {
+                    mesh.position.set(0, 5, 0);
+                }
+                if (desiredOrientation) {
+                    mesh.quaternion.copy(desiredOrientation);
+                }
+
                 const shape = new CANNON.Box(new CANNON.Vec3(...data.size.map(s => s / 2)));
                 const body = new CANNON.Body({
                     mass: data.mass,
-                    position: new CANNON.Vec3().copy(mesh.position),
-                    shape: shape,
-                    material: this.physicsMaterials[data.material]
+                    material: this.physicsMaterials[data.material] || this.physicsMaterials.metal
                 });
+                body.addShape(shape);
+                body.position.copy(mesh.position);
+                body.quaternion.copy(mesh.quaternion);
+
+                const cannonBodyId = THREE.MathUtils.generateUUID();
+                body.userData = {
+                    mesh: mesh,
+                    id: cannonBodyId,
+                    partId: partId
+                };
+                if (designInstanceId) {
+                    mesh.userData.designInstanceId = designInstanceId;
+                }
 
                 mesh.userData.body = body;
-                // Ensure partId is stored on mesh.userData as well for easier access from mesh
                 mesh.userData.partId = partId;
-                // Deep copy buildNodes to mesh.userData
                 if (data.buildNodes) {
                     mesh.userData.buildNodes = JSON.parse(JSON.stringify(data.buildNodes));
                 } else {
-                    mesh.userData.buildNodes = []; // Ensure it always has an array
+                    mesh.userData.buildNodes = [];
                 }
-                body.userData = { mesh: mesh, id: THREE.MathUtils.generateUUID(), partId }; // partId on body.userData is fine too
+                mesh.userData.connections = [];
+                mesh.userData.isDestroyed = false; // Initialize isDestroyed flag
+                mesh.userData.health = data.health; // Initialize health
+                // Ensure impactResistance is initialized, defaulting if not in partsData
+                mesh.userData.impactResistance = data.impactResistance !== undefined ? data.impactResistance : 0.5;
+
+
                 this.scene.add(mesh);
                 this.world.addBody(body);
                 this.robotParts.push(mesh);
-                this.selectPart(mesh);
+
+                if (!designInstanceId && this.mode === 'build') {
+                    this.selectPart(mesh);
+                }
+                return mesh;
             }
             
             selectPart(mesh) {
+                // If the same part is clicked again (and it's not null), or if trying to select null when nothing is selected, do nothing.
                 if(this.selectedPart === mesh) return;
 
                 if (this.mode === 'build') {
-                    this.transformControls.attach(mesh);
-                    this.selectedPart = mesh;
-                    this.updateInspector(mesh);
+                    if (mesh) { // A part is being selected
+                        this.transformControls.attach(mesh);
+                        this.selectedPart = mesh;
+                        this.updateInspector(mesh); // Update content first
+                        if (window.innerWidth < 768) { // Then slide open on mobile if a part is actually selected
+                            document.getElementById('inspector-panel').classList.add('open');
+                        }
+                    } else { // Deselecting (mesh is null)
+                        this.transformControls.detach();
+                        this.selectedPart = null;
+                        this.updateInspector(null); // This will handle closing the panel on mobile
+                    }
                 }
+                // Note: Selection logic for 'test' mode might be different or not applicable yet.
             }
 
             updatePhysicsBody(mesh) {
@@ -957,17 +1042,23 @@
             updateInspector(mesh) {
                 if (!mesh) {
                     this.inspectorContent.innerHTML = `<p class="text-gray-400 text-center italic mt-4">Select a part to inspect.</p>`;
+                    // If inspector is updated with no mesh (deselection), ensure it's closed on mobile.
+                    if (window.innerWidth < 768) { // Tailwind's 'md' breakpoint is 768px
+                        const inspectorPanel = document.getElementById('inspector-panel');
+                        if (inspectorPanel) inspectorPanel.classList.remove('open');
+                    }
                     return;
                 }
-                const partId = mesh.userData.partId; // Already stored on mesh.userData.partId
+                const partId = mesh.userData.partId;
                 const partData = this.partsData[partId];
                 let html = `
                     <div class="space-y-3">
-                        <h3 class="text-xl font-bold text-white">${partData.name}</h3>
+                        <h3 class="text-xl font-bold text-white">${partData.name} ${mesh.userData.isDestroyed ? '<span class="text-red-500">(Destroyed)</span>' : ''}</h3>
                         <div><strong>ID:</strong> <span class="text-gray-400 text-xs">${mesh.userData.body.userData.id}</span></div>
                         <div><strong>Mass:</strong> <span class="text-gray-300">${partData.mass} kg</span></div>
-                        <div><strong>Health:</strong> <span class="text-gray-300">${partData.health} / ${partData.health}</span></div>
+                        <div><strong>Health:</strong> <span class="text-gray-300">${mesh.userData.health} / ${partData.health}</span></div>
                         <div><strong>Material:</strong> <span class="text-gray-300 capitalize">${partData.material}</span></div>
+                        <div><strong>Impact Resistance:</strong> <span class="text-gray-300">${(mesh.userData.impactResistance * 100).toFixed(0)}%</span></div>
                     </div>
                 `;
 
@@ -1015,11 +1106,10 @@
                     if(this.selectedPart) this.transformControls.attach(this.selectedPart);
                     if(robotControlsUI) robotControlsUI.classList.add('hidden');
 
-                    // Reset physics states and ensure parts are not kinematic (if they were made so in test mode)
                     this.robotParts.forEach(mesh => {
                         const body = mesh.userData.body;
-                        body.type = CANNON.Body.DYNAMIC; // Ensure body is dynamic
-                        body.mass = this.partsData[mesh.userData.partId].mass; // Reset mass
+                        body.type = CANNON.Body.DYNAMIC;
+                        body.mass = this.partsData[mesh.userData.partId].mass;
                         body.updateMassProperties();
 
                         body.position.copy(mesh.userData.initialPosition || mesh.position);
@@ -1034,21 +1124,17 @@
                     this.transformControls.enabled = false;
                     if(robotControlsUI) robotControlsUI.classList.remove('hidden');
                     
-                    // Save initial state for reset and potentially make bodies kinematic if they should not be affected by physics during user control.
-                    // For now, we'll keep them dynamic as controls will apply forces/velocities.
                     this.robotParts.forEach(mesh => {
-                        // Store initial position if not already stored (e.g. if switching from build to test for the first time)
                         if (!mesh.userData.initialPosition) {
                              mesh.userData.initialPosition = mesh.position.clone();
                         }
                         if (!mesh.userData.initialRotation) {
                             mesh.userData.initialRotation = mesh.quaternion.clone();
                         }
-                        // Ensure physics body matches this initial state before simulation starts
                         const body = mesh.userData.body;
                         body.position.copy(mesh.userData.initialPosition);
                         body.quaternion.copy(mesh.userData.initialRotation);
-                        body.velocity.set(0,0,0); // Reset velocities
+                        body.velocity.set(0,0,0);
                         body.angularVelocity.set(0,0,0);
                     });
                 }
@@ -1072,7 +1158,7 @@
             }
 
             onMouseDown(event) {
-                 if (event.target.closest('.ui-panel')) return; // Ignore UI clicks
+                 if (event.target.closest('.ui-panel')) return;
 
                 this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
                 this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -1081,14 +1167,23 @@
                 const intersects = this.raycaster.intersectObjects(this.robotParts);
 
                 if (intersects.length > 0) {
-                    if (!this.transformControls.dragging) {
-                        this.selectPart(intersects[0].object);
+                    const intersectedMesh = intersects[0].object;
+                    if (intersectedMesh.userData && intersectedMesh.userData.isDestroyed) {
+                        // Clicked on a destroyed part, treat as empty space for selection
+                        if (this.mode === 'build' && this.selectedPart && !this.transformControls.dragging) {
+                            this.selectPart(null); // Deselect current part
+                        }
+                    } else if (!this.transformControls.dragging) {
+                        this.selectPart(intersectedMesh);
+                         if (window.innerWidth < 768 && this.selectedPart) {
+                           document.getElementById('inspector-panel').classList.add('open');
+                        }
                     }
                 } else {
                     if (this.mode === 'build' && !this.transformControls.dragging) {
-                        this.transformControls.detach();
-                        this.selectedPart = null;
-                        this.updateInspector(null);
+                        if (this.selectedPart) {
+                           this.selectPart(null);
+                        }
                     }
                 }
             }
@@ -1103,22 +1198,19 @@
                             const partToDelete = this.selectedPart;
                             const bodyToDelete = partToDelete.userData.body;
 
-                            // Remove constraints connected to this part
                             if (partToDelete.userData.connections) {
-                                partToDelete.userData.connections.forEach(connection => {
+                                [...partToDelete.userData.connections].forEach(connection => { // Iterate over a copy
                                     this.world.removeConstraint(connection.constraint);
                                     this.constraints = this.constraints.filter(c => c !== connection.constraint);
 
-                                    // Find the other part and remove the connection from its list
-                                    const otherBodyId = connection.targetBodyId;
-                                    const otherMesh = this.robotParts.find(p => p.userData.body.userData.id === otherBodyId);
-                                    if (otherMesh && otherMesh.userData.connections) {
-                                        otherMesh.userData.connections = otherMesh.userData.connections.filter(
+                                    const otherBody = this.world.bodies.find(b => b.userData && b.userData.id === connection.targetBodyId);
+                                    if (otherBody && otherBody.userData.mesh && otherBody.userData.mesh.userData.connections) {
+                                        otherBody.userData.mesh.userData.connections = otherBody.userData.mesh.userData.connections.filter(
                                             conn => conn.constraint !== connection.constraint
                                         );
                                     }
                                 });
-                                partToDelete.userData.connections = []; // Clear connections from deleted part
+                                partToDelete.userData.connections = [];
                             }
 
                             this.transformControls.detach();
@@ -1137,102 +1229,76 @@
 
             /**
              * Identifies the primary physics body of the constructed robot to be controlled.
-             * Heuristic:
-             * 1. Looks for specific chassis part IDs ('core_block', 'steel_chassis_block').
-             * 2. If not found, falls back to the part with the largest mass.
-             * 3. If still not found (e.g., empty scene), returns the first part added.
-             * @returns {CANNON.Body | null} The identified controllable body or null.
              */
             getControlledRobotBody() {
                 if (this.robotParts.length === 0) return null;
-
-                // 1. Prioritize specific chassis parts by their partId.
                 const chassisIds = ['core_block', 'steel_chassis_block'];
                 for (const partId of chassisIds) {
-                    const corePart = this.robotParts.find(p => p.userData.partId === partId);
+                    const corePart = this.robotParts.find(p => p.userData.partId === partId && !p.userData.isDestroyed);
                     if (corePart) return corePart.userData.body;
                 }
-
-                // 2. Fallback: find the part with the largest mass.
-                // This assumes a heavier part is more likely to be the main chassis.
                 let heaviestBody = null;
                 let maxMass = 0;
                 for (const part of this.robotParts) {
+                    if (part.userData.isDestroyed) continue;
                     if (part.userData.body && part.userData.body.mass > maxMass) {
                         maxMass = part.userData.body.mass;
                         heaviestBody = part.userData.body;
                     }
                 }
                 if (heaviestBody) return heaviestBody;
-
-                // 3. Absolute fallback: return the body of the first part added to the scene.
-                return this.robotParts[0]?.userData.body || null;
+                // Find first non-destroyed part as a last resort
+                const firstFunctionalPart = this.robotParts.find(p => !p.userData.isDestroyed);
+                return firstFunctionalPart?.userData.body || null;
             }
 
             animate() {
                 requestAnimationFrame(() => this.animate());
-
                 const deltaTime = this.clock.getDelta();
                 
                 if (this.mode === 'test') {
                     const controlledBody = this.getControlledRobotBody();
 
-                    // --- Thumbstick Controls ---
                     if (controlledBody && (this.thumbstickInput.x !== 0 || this.thumbstickInput.y !== 0)) {
                         const moveForceMagnitude = 800;
                         const turnTorqueMagnitude = 500;
-
-                        // Forward/Backward Force: Applied along the body's local Z-axis.
-                        // Thumbstick Y-axis controls magnitude and direction (positive Y for forward).
-                        const localForward = new CANNON.Vec3(0, 0, 1); // Assuming +Z is forward for the part.
-                        const worldForward = controlledBody.quaternion.vmult(localForward); // Transform local Z to world direction.
+                        const localForward = new CANNON.Vec3(0, 0, 1);
+                        const worldForward = controlledBody.quaternion.vmult(localForward);
                         const force = worldForward.scale(this.thumbstickInput.y * moveForceMagnitude);
-                        controlledBody.applyForce(force, controlledBody.position); // Apply at center of mass.
-
-                        // Rotation Torque: Applied around the body's local Y-axis.
-                        // Thumbstick X-axis controls magnitude and direction (negative X for left turn, positive torque around Y).
-                        const torque = new CANNON.Vec3(0, -this.thumbstickInput.x * turnTorqueMagnitude, 0); // Torque vector in local space.
+                        controlledBody.applyForce(force, controlledBody.position);
+                        const torque = new CANNON.Vec3(0, -this.thumbstickInput.x * turnTorqueMagnitude, 0);
                         controlledBody.applyLocalTorque(torque);
                     }
 
-                    // --- Action Button 1: Motor Activation ---
                     if (controlledBody && this.actionButton1Active) {
-                        const allPartsInRobot = this.getAllConnectedParts(controlledBody); // Get all parts of the current robot assembly.
+                        const allPartsInRobot = this.getAllConnectedParts(controlledBody);
                         allPartsInRobot.forEach(body => {
-                            // Check if the part associated with this body is a motor.
-                            if (body.userData && body.userData.mesh && body.userData.mesh.userData.partId) {
+                            if (body.userData && body.userData.mesh && body.userData.mesh.userData.partId && !body.userData.mesh.userData.isDestroyed) {
                                 const partId = body.userData.mesh.userData.partId;
                                 const partData = this.partsData[partId];
                                 if (partData && partData.type === 'motor') {
                                     const motorProps = partData.specificProperties || {};
-                                    const motorTorque = motorProps.maxTorque || 10; // Use defined maxTorque or a default.
-
-                                    // Assume motor's axle is its local Y-axis. This could be refined by storing axle direction in partData.
-                                    const motorAxisLocal = new CANNON.Vec3(0, 1, 0);
-                                    // Apply torque in the motor's local space along its axle.
+                                    const motorTorque = motorProps.maxTorque || 10;
+                                    const motorAxisLocal = new CANNON.Vec3(0, 1, 0); // Assuming motor spins around its local Y axis
                                     body.applyLocalTorque(motorAxisLocal.scale(motorTorque));
                                 }
                             }
                         });
                     }
-                    // Note: Motors currently only receive torque while the button is held.
-                    // No explicit "stop motor" logic is implemented on button release; they will slow due to physics.
 
-                    this.world.step(1 / 60, deltaTime, 3); // Step the physics simulation.
+                    this.world.step(1 / 60, deltaTime, 3);
                     this.robotParts.forEach(mesh => {
                         mesh.position.copy(mesh.userData.body.position);
                         mesh.quaternion.copy(mesh.userData.body.quaternion);
                     });
-                } else { // build mode
+                } else {
                     this.orbitControls.update();
                 }
-
                 this.composer.render();
             }
         }
 
         window.onload = () => new BattleBotsGame();
-
     </script>
 </body>
 </html>

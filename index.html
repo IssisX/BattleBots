@@ -213,6 +213,15 @@
         </div>
     </div>
 
+    <!-- Player Resources Display -->
+    <div id="player-resources-display" class="ui-panel absolute top-4 left-4 md:left-auto md:right-4 p-2 text-xs text-gray-300 rounded-md pointer-events-none">
+        <!-- Resources will be injected here -->
+    </div>
+    <!-- Robot Stats Display -->
+    <div id="robot-stats-display" class="ui-panel absolute bottom-4 right-4 md:bottom-auto md:top-4 md:right-1/2 md:translate-x-1/2 p-2 text-xs text-gray-300 rounded-md pointer-events-none">
+        <!-- Stats will be injected here -->
+    </div>
+
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -227,6 +236,11 @@
 
         class BattleBotsGame {
             constructor() {
+                // Collision Groups
+                this.ACTIVE_ROBOT_PART_GROUP = 1;
+                this.DEBRIS_PART_GROUP = 2;
+                this.GROUND_GROUP = 4;
+
                 this.initEngine();
                 this.initPhysics();
                 this.initScene();
@@ -264,6 +278,11 @@
                 this.clock = new THREE.Clock();
                 this.robotParts = [];
                 this.constraints = [];
+
+                // Particle System
+                this.particlePool = [];
+                this.maxParticles = 100;
+                this.activeParticles = [];
             }
 
             initPhysics() {
@@ -347,6 +366,8 @@
                 this.scene.add(ground);
                 const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: this.physicsMaterials.ground });
                 groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+                groundBody.collisionFilterGroup = this.GROUND_GROUP;
+                groundBody.collisionFilterMask = this.ACTIVE_ROBOT_PART_GROUP | this.DEBRIS_PART_GROUP | this.GROUND_GROUP;
                 this.world.addBody(groundBody);
                 
                 const grid = new THREE.GridHelper(200, 100, 0x4f46e5, 0x444444);
@@ -369,6 +390,24 @@
                     highlightMesh.visible = false;
                     this.scene.add(highlightMesh);
                     this.buildNodeHighlights.push(highlightMesh);
+                }
+
+                // Initialize Particle System Material and Pool
+                const particleTexture = new THREE.TextureLoader().load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAABl0RVh0U29mdHdhcmUAUGFpbnQuTkVUIHYzLjUuMTFHJEvZAAAAaklEQVRYR+2c0QkAIAhDwb//2d7LCcGdInLNDPOpBwZIzK25EGAhNBV8oJ3giGfxSggE/L4jYdAtO6GPMN8LgL8uCYBvC4D/VbM8oM2u6U2/QCl8gE3rJv7+f5p3zAN3aB0GACD/gQBg8A8IABb/CMCAf2AAAPAPBABvP0XhNP+1AP8+ANMD3PZDAAAAAElFTkSuQmCC');
+                this.particleMaterial = new THREE.SpriteMaterial({
+                    map: particleTexture,
+                    color: 0x888888, // Grey for smoke
+                    transparent: true,
+                    opacity: 0.8,
+                    blending: THREE.NormalBlending
+                });
+
+                for (let i = 0; i < this.maxParticles; i++) {
+                    const particle = new THREE.Sprite(this.particleMaterial); // Share material
+                    particle.visible = false;
+                    particle.scale.set(0.2, 0.2, 0.2);
+                    this.scene.add(particle);
+                    this.particlePool.push(particle);
                 }
             }
 
@@ -493,7 +532,30 @@
                 } else {
                     if(!this.defaultBotsListEl) console.warn("Element with ID 'default-bots-list' not found for populating bot designs.");
                 }
+
+                // Initial Robot Stats and Resources Display
+                this.updateRobotStatsDisplay();
+                const resourcesEl = document.getElementById('player-resources-display');
+                if (resourcesEl) {
+                    resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
+                }
             }
+
+                // Initial Robot Stats and Resources Display
+                this.updateRobotStatsDisplay();
+                const resourcesEl = document.getElementById('player-resources-display');
+                if (resourcesEl) {
+                    resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
+                }
+            } // This should be the correct end of initUI
+
+            // The following lines were erroneously duplicated and will be removed by this diff.
+            // this.updateRobotStatsDisplay();
+            // const resourcesEl = document.getElementById('player-resources-display');
+            // if (resourcesEl) {
+            //     resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
+            // }
+            // } // This extra brace will also be removed.
 
             initControls() {
                 this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -889,6 +951,7 @@
                 }
                 this.robotParts = [];
                 this.constraints = [];
+                this.updateRobotStatsDisplay(); // Update stats after clearing robot
             }
 
             loadBotDesign(botName) {
@@ -935,6 +998,7 @@
                     });
                 }
                 this.updateInspector(null);
+                this.updateRobotStatsDisplay(); // Update stats after loading design
                 console.log(`Loaded bot design: ${botName}`);
             }
 
@@ -971,7 +1035,9 @@
                 const shape = new CANNON.Box(new CANNON.Vec3(...data.size.map(s => s / 2)));
                 const body = new CANNON.Body({
                     mass: data.mass,
-                    material: this.physicsMaterials[data.material] || this.physicsMaterials.metal
+                    material: this.physicsMaterials[data.material] || this.physicsMaterials.metal,
+                    collisionFilterGroup: this.ACTIVE_ROBOT_PART_GROUP,
+                    collisionFilterMask: this.ACTIVE_ROBOT_PART_GROUP | this.GROUND_GROUP
                 });
                 body.addShape(shape);
                 body.position.copy(mesh.position);
@@ -1000,14 +1066,44 @@
                 // Ensure impactResistance is initialized, defaulting if not in partsData
                 mesh.userData.impactResistance = data.impactResistance !== undefined ? data.impactResistance : 0.5;
 
+                // Collision and Damage Logic
+                body.addEventListener('collide', (event) => {
+                    if (mesh.userData.isDestroyed) return; // Already destroyed
+
+                    const contact = event.contact;
+                    const impactVelocity = contact.getImpactVelocityAlongNormal();
+                    const minImpactForDamage = 1.0; // Minimum impact velocity to register damage
+                    const damageFactor = 20; // Multiplier for damage calculation
+
+                    if (Math.abs(impactVelocity) > minImpactForDamage) {
+                        const rawDamage = Math.abs(impactVelocity) * damageFactor;
+                        const resistance = mesh.userData.impactResistance || 0;
+                        const actualDamage = rawDamage * (1 - resistance);
+
+                        mesh.userData.health -= actualDamage;
+                        mesh.userData.health = Math.max(0, mesh.userData.health); // Clamp health to 0
+
+                        console.log(`Part ${mesh.userData.partId} took ${actualDamage.toFixed(2)} damage. Health: ${mesh.userData.health.toFixed(2)}`);
+
+                        if (this.selectedPart === mesh) {
+                            this.updateInspector(mesh); // Update inspector if selected part is damaged
+                        }
+
+                        if (mesh.userData.health <= 0) {
+                            this.destroyPart(body); // Call the centralized destroyPart method
+                        }
+                    }
+                });
 
                 this.scene.add(mesh);
                 this.world.addBody(body);
                 this.robotParts.push(mesh);
+                this.updateRobotStatsDisplay(); // Update stats after adding a part
 
                 if (!designInstanceId && this.mode === 'build') {
                     this.selectPart(mesh);
                 }
+                this.updateRobotStatsDisplay(); // Update stats after adding a part
                 return mesh;
             }
             
@@ -1050,49 +1146,121 @@
                     return;
                 }
                 const partId = mesh.userData.partId;
-                const partData = this.partsData[partId];
-                let html = `
-                    <div class="space-y-3">
-                        <h3 class="text-xl font-bold text-white">${partData.name} ${mesh.userData.isDestroyed ? '<span class="text-red-500">(Destroyed)</span>' : ''}</h3>
-                        <div><strong>ID:</strong> <span class="text-gray-400 text-xs">${mesh.userData.body.userData.id}</span></div>
-                        <div><strong>Mass:</strong> <span class="text-gray-300">${partData.mass} kg</span></div>
-                        <div><strong>Health:</strong> <span class="text-gray-300">${mesh.userData.health} / ${partData.health}</span></div>
-                        <div><strong>Material:</strong> <span class="text-gray-300 capitalize">${partData.material}</span></div>
-                        <div><strong>Impact Resistance:</strong> <span class="text-gray-300">${(mesh.userData.impactResistance * 100).toFixed(0)}%</span></div>
-                    </div>
-                `;
+                const partDef = this.partsData[partId]; // Renamed partData to partDef for clarity
 
+                // Clear previous content
+                this.inspectorContent.innerHTML = '';
+
+                // --- Part Name Display and Input ---
+                const nameHeader = document.createElement('h3');
+                nameHeader.className = 'text-xl font-bold text-white';
+                const displayName = mesh.userData.customName || partDef.name;
+                nameHeader.textContent = displayName;
+                if (mesh.userData.customName && mesh.userData.customName !== partDef.name) {
+                    const originalNameSpan = document.createElement('span');
+                    originalNameSpan.className = 'text-sm text-gray-400 ml-2';
+                    originalNameSpan.textContent = `(${partDef.name})`;
+                    nameHeader.appendChild(originalNameSpan);
+                }
+                this.inspectorContent.appendChild(nameHeader);
+
+                const nameInputDiv = document.createElement('div');
+                nameInputDiv.className = 'mt-2 mb-3'; // Added mb-3 for spacing
+                const nameLabel = document.createElement('div');
+                nameLabel.innerHTML = `<strong>Custom Name:</strong>`;
+                nameInputDiv.appendChild(nameLabel);
+
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.id = 'custom-name-input'; // ID for querying
+                nameInput.className = 'w-full p-2 bg-gray-700 border border-gray-600 rounded-md text-white mt-1 focus:ring-indigo-500 focus:border-indigo-500';
+                nameInput.placeholder = 'Enter custom name';
+                nameInput.value = mesh.userData.customName || '';
+                nameInputDiv.appendChild(nameInput);
+                this.inspectorContent.appendChild(nameInputDiv);
+
+                nameInput.addEventListener('change', (event) => {
+                    const newCustomName = event.target.value.trim();
+                    if (newCustomName) {
+                        mesh.userData.customName = newCustomName;
+                    } else {
+                        delete mesh.userData.customName;
+                    }
+                    this.updateInspector(mesh); // Refresh inspector to update name display
+                });
+
+                // --- Basic Info Container (ID, Mass, Health, etc.) ---
+                const basicInfoDiv = document.createElement('div');
+                basicInfoDiv.className = 'space-y-2 mt-3'; // Added mt-3 for spacing
+                // Note: Name header is now separate
+                basicInfoDiv.innerHTML = `
+                    <div><strong>ID:</strong> <span class="text-gray-400 text-xs">${mesh.userData.body.userData.id}</span></div>
+                    <div><strong>Mass:</strong> <span class="text-gray-300">${partDef.mass} kg</span></div>
+                    <div><strong>Health:</strong> <span class="text-gray-300">${mesh.userData.health} / ${partDef.health} ${mesh.userData.isDestroyed ? '<span class="text-red-500">(Destroyed)</span>' : ''}</span></div>
+                    <div><strong>Material:</strong> <span class="text-gray-300 capitalize">${partDef.material}</span></div>
+                    <div><strong>Impact Resistance:</strong> <span class="text-gray-300">${(mesh.userData.impactResistance * 100).toFixed(0)}%</span></div>
+                `;
+                this.inspectorContent.appendChild(basicInfoDiv);
+
+                // --- Motor Specific Properties UI ---
+                if (partDef && partDef.type === 'motor') {
+                    const motorSpecificsDiv = document.createElement('div');
+                    motorSpecificsDiv.className = 'mt-4 pt-4 border-t border-gray-600 space-y-2';
+
+                    const torqueLabel = document.createElement('div');
+                    torqueLabel.innerHTML = `<strong>Custom Max Torque:</strong>`;
+                    motorSpecificsDiv.appendChild(torqueLabel);
+
+                    const torqueInput = document.createElement('input');
+                    torqueInput.type = 'number';
+                    torqueInput.className = 'w-full p-2 bg-gray-700 border border-gray-600 rounded-md text-white mt-1 focus:ring-indigo-500 focus:border-indigo-500';
+                    torqueInput.step = '0.5';
+
+                    const body = mesh.userData.body;
+                    // Initialize customMaxTorque on body.userData if it doesn't exist
+                    if (!body.userData.hasOwnProperty('customMaxTorque')) {
+                        body.userData.customMaxTorque = partDef.specificProperties ? (partDef.specificProperties.maxTorque !== undefined ? partDef.specificProperties.maxTorque : 10) : 10;
+                    }
+                    torqueInput.value = body.userData.customMaxTorque;
+
+                    torqueInput.addEventListener('change', (event) => {
+                        const newTorque = parseFloat(event.target.value);
+                        if (!isNaN(newTorque)) {
+                            body.userData.customMaxTorque = newTorque;
+                            console.log(`Set customMaxTorque for ${partDef.name} to ${newTorque}`);
+                        }
+                    });
+                    motorSpecificsDiv.appendChild(torqueInput);
+                    this.inspectorContent.appendChild(motorSpecificsDiv);
+                }
+
+                // Connections Display
+                const connectionsDiv = document.createElement('div');
+                connectionsDiv.className = 'mt-4 pt-4 border-t border-gray-600';
+                let connectionsHtml = `
+                    <h4 class="text-lg font-semibold mb-2 text-white">Connections:</h4>
+                `;
                 if (mesh.userData.connections && mesh.userData.connections.length > 0) {
-                    html += `
-                        <div class="mt-4 pt-4 border-t border-gray-600">
-                            <h4 class="text-lg font-semibold mb-2 text-white">Connections:</h4>
-                            <ul class="list-disc list-inside text-sm text-gray-400 space-y-1">
-                    `;
+                    connectionsHtml += `<ul class="list-disc list-inside text-sm text-gray-400 space-y-1">`;
                     mesh.userData.connections.forEach(connection => {
                         const targetBody = this.world.bodies.find(b => b.userData && b.userData.id === connection.targetBodyId);
                         let targetName = "Unknown Part";
-                        let targetPartId = "N/A";
-                        if (targetBody && targetBody.userData && targetBody.userData.mesh && targetBody.userData.mesh.userData.partId) {
-                            targetPartId = targetBody.userData.mesh.userData.partId;
-                            if (this.partsData[targetPartId]) {
-                                targetName = this.partsData[targetPartId].name;
+                        // let targetPartId = "N/A"; // Not strictly needed here
+                        if (targetBody && targetBody.userData && targetBody.userData.mesh) {
+                            const targetMesh = targetBody.userData.mesh;
+                            const targetPartDefKey = targetMesh.userData.partId;
+                            if (this.partsData[targetPartDefKey]) {
+                                targetName = targetMesh.userData.customName || this.partsData[targetPartDefKey].name;
                             }
                         }
-                        html += `<li>Connected to: ${targetName} <span class="text-xs">(${connection.targetBodyId})</span></li>`;
+                        connectionsHtml += `<li>Connected to: ${targetName} <span class="text-xs">(${connection.targetBodyId})</span></li>`;
                     });
-                    html += `
-                            </ul>
-                        </div>
-                    `;
+                    connectionsHtml += `</ul>`;
                 } else {
-                    html += `
-                        <div class="mt-4 pt-4 border-t border-gray-600">
-                             <h4 class="text-lg font-semibold mb-2 text-white">Connections:</h4>
-                            <p class="text-sm text-gray-400 italic">No connections.</p>
-                        </div>
-                    `;
+                    connectionsHtml += `<p class="text-sm text-gray-400 italic">No connections.</p>`;
                 }
-                this.inspectorContent.innerHTML = html;
+                connectionsDiv.innerHTML = connectionsHtml;
+                this.inspectorContent.appendChild(connectionsDiv);
             }
 
             setMode(newMode) {
@@ -1217,6 +1385,7 @@
                             this.scene.remove(partToDelete);
                             this.world.remove(bodyToDelete);
                             this.robotParts = this.robotParts.filter(p => p !== partToDelete);
+                            this.updateRobotStatsDisplay(); // Update stats after deleting a part
                             this.selectedPart = null;
                             this.updateInspector(null);
                             console.log('Deleted part and its constraints:', bodyToDelete.userData.id);
@@ -1252,9 +1421,132 @@
                 return firstFunctionalPart?.userData.body || null;
             }
 
+            // --- Particle System Methods ---
+            triggerParticleBurst(position) {
+                const count = 15; // Number of particles in a burst
+                const burstSpeed = 3; // Max speed of particles
+
+                for (let i = 0; i < count; i++) {
+                    if (this.particlePool.length === 0) {
+                        // Optional: Could take the oldest active particle if pool is empty
+                        // For now, just skip if no particles are available in the pool
+                        console.warn("Particle pool empty, skipping some particles for burst.");
+                        continue;
+                    }
+                    const particle = this.particlePool.pop();
+                    const particleLifetime = 0.4 + Math.random() * 0.6; // 0.4 to 1.0 seconds
+
+                    particle.visible = true;
+                    particle.position.copy(position);
+                    particle.material.opacity = 0.8; // Reset opacity
+                    particle.material.color.setHex(0x888888); // Reset to smoke color
+                    // particle.material.color.setHex(Math.random() > 0.3 ? (Math.random() > 0.5 ? 0xff8800 : 0xffff00) : 0x555555); // Sparks (orange/yellow) and smoke
+
+                    particle.scale.set(0.2, 0.2, 0.2); // Reset scale
+
+                    particle.userData.velocity = new THREE.Vector3(
+                        (Math.random() - 0.5) * burstSpeed,
+                        (Math.random() - 0.5) * burstSpeed * 1.5, // Bias upwards slightly
+                        (Math.random() - 0.5) * burstSpeed
+                    );
+                    particle.userData.lifetime = particleLifetime;
+                    particle.userData.age = 0;
+
+                    this.activeParticles.push(particle);
+                }
+            }
+
+            // Placeholder for destroyPart - actual implementation might be elsewhere
+            // This is just to show where triggerParticleBurst would be called
+            destroyPart(bodyToDestroy) {
+                if (!bodyToDestroy || !bodyToDestroy.userData || !bodyToDestroy.userData.mesh) {
+                    console.error("Invalid body or mesh provided to destroyPart");
+                    return;
+                }
+                const mesh = bodyToDestroy.userData.mesh;
+
+                // 1. Visual cues for destruction (already exists or should be here)
+                mesh.userData.isDestroyed = true;
+                if (!mesh.material.cloned) { // Avoid re-cloning if already done
+                    mesh.material = mesh.material.clone();
+                    mesh.material.cloned = true;
+                }
+                mesh.material.color.setHex(0x555555);
+                mesh.material.opacity = 0.6;
+                mesh.material.transparent = true;
+
+                // 2. Trigger particle burst
+                this.triggerParticleBurst(mesh.position);
+                console.log(`Placeholder: Play part destruction sound for part ${bodyToDestroy.userData.mesh.userData.partId}`);
+
+                // 3. Physics alterations
+                bodyToDestroy.collisionFilterGroup = this.DEBRIS_PART_GROUP;
+                bodyToDestroy.collisionFilterMask = this.GROUND_GROUP | this.DEBRIS_PART_GROUP;
+
+                // Optional: Reduce mass for debris to make it less disruptive if it still has significant mass
+                if (bodyToDestroy.mass > 0.2) { // Check if mass is somewhat significant
+                    bodyToDestroy.mass = 0.1; // Set to a low mass
+                    bodyToDestroy.updateMassProperties(); // Important to call after changing mass
+                }
+
+                // Constraint removal should be handled here or as part of a more comprehensive cleanup
+                if (mesh.userData.connections) {
+                    // This part would need to correctly remove constraints from the world
+                    // and update other connected parts. For this example, we'll just clear.
+                     console.log(`Part ${mesh.userData.partId} destroyed. Constraints should be handled.`);
+                     // mesh.userData.connections = []; // Simplified for this example
+                }
+
+                // Note: Actual removal from scene/world might happen elsewhere or be delayed
+                // For robust system, ensure constraints are fully managed upon destruction.
+                if(this.selectedPart === mesh) {
+                    this.selectPart(null); // Deselect if it was selected
+                }
+                this.updateInspector(mesh); // Update inspector to show destroyed state
+                console.log(`Visual destruction for part ${mesh.userData.partId} complete.`);
+            }
+
+            updateRobotStatsDisplay() {
+                const statsEl = document.getElementById('robot-stats-display');
+                if (!statsEl) {
+                    // console.warn("Robot stats display element not found."); // Optional: Warn if element is missing
+                    return;
+                }
+
+                let totalMass = 0;
+                let partCount = 0;
+                for (const partMesh of this.robotParts) {
+                    if (partMesh.userData && !partMesh.userData.isDestroyed && partMesh.userData.body) {
+                        partCount++;
+                        totalMass += partMesh.userData.body.mass;
+                    }
+                }
+                statsEl.innerHTML = `Parts: ${partCount}<br>Mass: ${totalMass.toFixed(1)} kg`;
+            }
+
             animate() {
                 requestAnimationFrame(() => this.animate());
                 const deltaTime = this.clock.getDelta();
+
+                // Update active particles
+                for (let i = this.activeParticles.length - 1; i >= 0; i--) {
+                    const particle = this.activeParticles[i];
+                    particle.userData.age += deltaTime;
+
+                    if (particle.userData.age >= particle.userData.lifetime) {
+                        particle.visible = false;
+                        this.particlePool.push(particle);
+                        this.activeParticles.splice(i, 1);
+                        continue;
+                    }
+
+                    particle.position.addScaledVector(particle.userData.velocity, deltaTime);
+                    particle.material.opacity = Math.max(0, 0.8 * (1 - (particle.userData.age / particle.userData.lifetime)));
+
+                    const scaleProgress = particle.userData.age / particle.userData.lifetime;
+                    const currentScale = Math.max(0.01, 0.2 * (1 - scaleProgress * 0.8) + 0.05 * (scaleProgress)); // Shrink, but not to zero, maybe end larger for smoke
+                    particle.scale.set(currentScale, currentScale, currentScale);
+                }
                 
                 if (this.mode === 'test') {
                     const controlledBody = this.getControlledRobotBody();
@@ -1275,12 +1567,23 @@
                         allPartsInRobot.forEach(body => {
                             if (body.userData && body.userData.mesh && body.userData.mesh.userData.partId && !body.userData.mesh.userData.isDestroyed) {
                                 const partId = body.userData.mesh.userData.partId;
-                                const partData = this.partsData[partId];
-                                if (partData && partData.type === 'motor') {
-                                    const motorProps = partData.specificProperties || {};
-                                    const motorTorque = motorProps.maxTorque || 10;
+                                const motorDataFromDef = this.partsData[partId]; // motorDataFromDef is the definition from partsData
+
+                                if (motorDataFromDef && motorDataFromDef.type === 'motor') {
+                                    let motorTorque;
+                                    // Prioritize customMaxTorque if it's set on the instance (body.userData)
+                                    if (body.userData.hasOwnProperty('customMaxTorque')) {
+                                        motorTorque = body.userData.customMaxTorque;
+                                    } else {
+                                        // Fallback to specificProperties in definition, then to a general default
+                                        motorTorque = (motorDataFromDef.specificProperties && motorDataFromDef.specificProperties.maxTorque !== undefined)
+                                            ? motorDataFromDef.specificProperties.maxTorque
+                                            : 10; // General default if not in specificProperties
+                                    }
+
                                     const motorAxisLocal = new CANNON.Vec3(0, 1, 0); // Assuming motor spins around its local Y axis
-                                    body.applyLocalTorque(motorAxisLocal.scale(motorTorque));
+                                    const localTorqueVector = motorAxisLocal.scale(motorTorque);
+                                    body.applyLocalTorque(localTorqueVector);
                                 }
                             }
                         });
@@ -1300,5 +1603,6 @@
 
         window.onload = () => new BattleBotsGame();
     </script>
+
 </body>
 </html>

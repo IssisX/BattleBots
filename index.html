@@ -241,6 +241,8 @@
                 this.DEBRIS_PART_GROUP = 2;
                 this.GROUND_GROUP = 4;
 
+                this.playerScrap = 1000; // Initial player scrap
+
                 this.initEngine();
                 this.initPhysics();
                 this.initScene();
@@ -535,27 +537,15 @@
 
                 // Initial Robot Stats and Resources Display
                 this.updateRobotStatsDisplay();
-                const resourcesEl = document.getElementById('player-resources-display');
-                if (resourcesEl) {
-                    resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
-                }
-            }
-
-                // Initial Robot Stats and Resources Display
-                this.updateRobotStatsDisplay();
-                const resourcesEl = document.getElementById('player-resources-display');
-                if (resourcesEl) {
-                    resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
-                }
+                this.updatePlayerResourcesDisplay(); // Call new method
             } // This should be the correct end of initUI
 
-            // The following lines were erroneously duplicated and will be removed by this diff.
-            // this.updateRobotStatsDisplay();
-            // const resourcesEl = document.getElementById('player-resources-display');
-            // if (resourcesEl) {
-            //     resourcesEl.innerHTML = "Scrap: N/A"; // Placeholder
-            // }
-            // } // This extra brace will also be removed.
+            updatePlayerResourcesDisplay() {
+                const resourcesEl = document.getElementById('player-resources-display');
+                if (resourcesEl) {
+                    resourcesEl.innerHTML = `Scrap: ${this.playerScrap}`;
+                }
+            }
 
             initControls() {
                 this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -1098,12 +1088,12 @@
                 this.scene.add(mesh);
                 this.world.addBody(body);
                 this.robotParts.push(mesh);
-                this.updateRobotStatsDisplay(); // Update stats after adding a part
+                // Ensure only one call before return
 
                 if (!designInstanceId && this.mode === 'build') {
                     this.selectPart(mesh);
                 }
-                this.updateRobotStatsDisplay(); // Update stats after adding a part
+                this.updateRobotStatsDisplay(); // Final update before returning
                 return mesh;
             }
             
